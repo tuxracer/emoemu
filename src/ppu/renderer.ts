@@ -69,7 +69,8 @@ export class TerminalRenderer {
       output.push(line);
     }
 
-    return output.join('\n');
+    // Move cursor home and output frame
+    return this.moveCursorHome() + output.join('\n');
   }
 
   // Calculate luminance of NES color
@@ -103,5 +104,15 @@ export class TerminalRenderer {
   // Show cursor
   showCursor(): string {
     return '\x1b[?25h';
+  }
+
+  // Get the row number for the status line (below the rendered frame)
+  getStatusRow(): number {
+    return this.height + 1;
+  }
+
+  // Move cursor to a specific row
+  moveCursorToRow(row: number): string {
+    return `\x1b[${row};1H`;
   }
 }
