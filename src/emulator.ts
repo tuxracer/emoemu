@@ -4,12 +4,27 @@ import { Bus } from './memory/bus.js';
 import { Cartridge } from './cartridge/cartridge.js';
 import { Controller, defaultKeyMap } from './input/controller.js';
 import { TerminalRenderer } from './ppu/renderer.js';
+import { KittyRenderer } from './ppu/kitty-renderer.js';
+
+export type RenderMode = 'terminal' | 'kitty';
+
+// Common renderer interface
+interface Renderer {
+  render(frameBuffer: Uint8Array): string;
+  clearScreen(): string;
+  hideCursor(): string;
+  showCursor(): string;
+  getStatusRow(): number;
+  moveCursorToRow(row: number): string;
+}
 
 export interface EmulatorOptions {
   romPath: string;
   width?: number;
   height?: number;
   useColor?: boolean;
+  renderMode?: RenderMode;
+  scale?: number;  // For Kitty renderer
 }
 
 export class Emulator {
@@ -19,12 +34,17 @@ export class Emulator {
   private cartridge: Cartridge;
   private controller1: Controller;
   private controller2: Controller;
-  private renderer: TerminalRenderer;
+  private renderer: Renderer;
+  private renderMode: RenderMode;
 
   private running: boolean = false;
   private frameCount: number = 0;
   private lastFrameTime: number = 0;
   private targetFrameTime: number = 1000 / 60; // ~16.67ms for 60 FPS
+
+  // Track held keys and their release timeouts
+  private heldKeys: Map<string, NodeJS.Timeout> = new Map();
+  private readonly keyReleaseDelay: number = 80; // ms - key repeat is ~30ms, so 80ms detects release
 
   constructor(options: EmulatorOptions) {
     // Initialize components
@@ -42,12 +62,20 @@ export class Emulator {
     this.bus.connectController(2, this.controller2);
     this.ppu.connectCartridge(this.cartridge);
 
-    // Initialize renderer
-    this.renderer = new TerminalRenderer({
-      width: options.width ?? 128,
-      height: options.height ?? 60,
-      useColor: options.useColor ?? true,
-    });
+    // Initialize renderer based on mode
+    this.renderMode = options.renderMode ?? 'kitty';
+
+    if (this.renderMode === 'kitty') {
+      this.renderer = new KittyRenderer({
+        scale: options.scale ?? 2,
+      });
+    } else {
+      this.renderer = new TerminalRenderer({
+        width: options.width ?? 128,
+        height: options.height ?? 60,
+        useColor: options.useColor ?? true,
+      });
+    }
   }
 
   reset(): void {
@@ -124,13 +152,14 @@ export class Emulator {
         // Run emulation for one frame
         this.runFrame();
 
-        // Render to terminal
-        process.stdout.write(this.renderer.moveCursorHome());
+        // Render to terminal (diff-based, includes cursor positioning)
         process.stdout.write(this.renderFrame());
 
-        // Calculate actual FPS
+        // Calculate actual FPS and display on fixed status line
         const fps = 1000 / elapsed;
-        process.stdout.write(`\n FPS: ${fps.toFixed(1)} | Frame: ${this.frameCount}`);
+        const statusRow = this.renderer.getStatusRow();
+        process.stdout.write(this.renderer.moveCursorToRow(statusRow));
+        process.stdout.write(`FPS: ${fps.toFixed(1)} | Frame: ${this.frameCount}`);
 
         this.lastFrameTime = now;
       }
@@ -160,25 +189,92 @@ export class Emulator {
         return;
       }
 
-      // Handle escape
+      // Handle escape (but not arrow keys which start with escape)
       if (key === '\u001b') {
         this.stop();
         return;
       }
 
-      // Map key to button
-      const button = defaultKeyMap[key];
-      if (button !== undefined) {
-        this.controller1.setButton(button, true);
-        // Release after a short delay
-        setTimeout(() => {
-          this.controller1.setButton(button, false);
-        }, 100);
+      // Handle each key in the input (allows multiple simultaneous keys)
+      // Arrow keys come as escape sequences, handle them specially
+      const keys = this.parseKeys(key);
+
+      for (const k of keys) {
+        const button = defaultKeyMap[k];
+        if (button !== undefined) {
+          this.handleKeyPress(k, button);
+        }
       }
     });
   }
 
+  // Parse input into individual keys (handles escape sequences for arrow keys)
+  private parseKeys(input: string): string[] {
+    const keys: string[] = [];
+    let i = 0;
+
+    while (i < input.length) {
+      // Check for arrow key escape sequences
+      if (input[i] === '\u001b' && input[i + 1] === '[') {
+        if (input[i + 2] === 'A') {
+          keys.push('\u001b[A'); // Up arrow
+          i += 3;
+          continue;
+        } else if (input[i + 2] === 'B') {
+          keys.push('\u001b[B'); // Down arrow
+          i += 3;
+          continue;
+        } else if (input[i + 2] === 'C') {
+          keys.push('\u001b[C'); // Right arrow
+          i += 3;
+          continue;
+        } else if (input[i + 2] === 'D') {
+          keys.push('\u001b[D'); // Left arrow
+          i += 3;
+          continue;
+        }
+      }
+
+      // Regular character
+      keys.push(input[i]);
+      i++;
+    }
+
+    return keys;
+  }
+
+  // Handle key press with hold detection
+  private handleKeyPress(key: string, button: number): void {
+    // Clear any existing release timeout for this key
+    const existingTimeout = this.heldKeys.get(key);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+
+    // Press the button (may already be pressed, that's fine)
+    this.controller1.setButton(button, true);
+
+    // Set a new timeout to release the key if no repeat events come
+    const timeout = setTimeout(() => {
+      this.controller1.setButton(button, false);
+      this.heldKeys.delete(key);
+    }, this.keyReleaseDelay);
+
+    this.heldKeys.set(key, timeout);
+  }
+
   private cleanup(): void {
+    // Clear all pending key release timeouts
+    for (const timeout of this.heldKeys.values()) {
+      clearTimeout(timeout);
+    }
+    this.heldKeys.clear();
+
+    // Clear Kitty graphics if using Kitty renderer
+    if (this.renderMode === 'kitty') {
+      process.stdout.write(this.renderer.clearScreen());
+    }
+
     process.stdout.write(this.renderer.showCursor());
     process.stdout.write('\n');
 

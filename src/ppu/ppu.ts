@@ -88,6 +88,10 @@ export class PPU {
   private spriteZeroOnLine: boolean = false;
   private spriteZeroBeingRendered: boolean = false;
 
+  // Saved horizontal scroll at start of scanline (for correct tile fetching)
+  private scanlineStartCoarseX: number = 0;
+  private scanlineStartNametable: number = 0;
+
   // Timing
   scanline: number = 0;
   cycle: number = 0;
@@ -122,6 +126,8 @@ export class PPU {
     this.sprites = [];
     this.spriteZeroOnLine = false;
     this.spriteZeroBeingRendered = false;
+    this.scanlineStartCoarseX = 0;
+    this.scanlineStartNametable = 0;
   }
 
   connectCartridge(cartridge: Cartridge): void {
@@ -296,7 +302,7 @@ export class PPU {
     // Scrolling updates during rendering
     if (renderingEnabled) {
       if (visibleLine || preLine) {
-        // Increment horizontal scroll after each tile
+        // Increment horizontal scroll after each tile (every 8 cycles)
         if (fetchCycle && (this.cycle % 8 === 0)) {
           this.incrementX();
         }
@@ -348,14 +354,19 @@ export class PPU {
     }
   }
 
-  // Evaluate sprites for the current scanline
+  // Evaluate sprites for the next scanline's rendering
+  // Called at cycle 257, sprites will be rendered on the NEXT scanline
   private evaluateSprites(): void {
-    const nextScanline = this.scanline;
     const spriteHeight = (this.ctrl & CtrlFlag.SPRITE_SIZE) ? 16 : 8;
 
     this.spriteCount = 0;
     this.sprites = [];
     this.spriteZeroOnLine = false;
+
+    // Calculate which scanline these sprites will be rendered on
+    // At cycle 257 of scanline N, we're preparing for scanline N+1's rendering
+    // Special case: at pre-render scanline 261, next visible is scanline 0
+    const renderScanline = this.scanline === 261 ? 0 : this.scanline + 1;
 
     // Scan all 64 sprites in OAM
     for (let i = 0; i < 64 && this.spriteCount < 8; i++) {
@@ -365,8 +376,8 @@ export class PPU {
       const attributes = this.oam[oamIndex + 2];
       const spriteX = this.oam[oamIndex + 3];
 
-      // Check if sprite is on this scanline
-      const diff = nextScanline - spriteY;
+      // Check if sprite is on the render scanline
+      const diff = renderScanline - spriteY;
       if (diff >= 0 && diff < spriteHeight) {
         if (this.spriteCount < 8) {
           // Fetch sprite pattern data
@@ -426,7 +437,7 @@ export class PPU {
       for (let i = 8; i < 64; i++) {
         const oamIndex = i * 4;
         const spriteY = this.oam[oamIndex];
-        const diff = nextScanline - spriteY;
+        const diff = renderScanline - spriteY;
         if (diff >= 0 && diff < spriteHeight) {
           this.status |= StatusFlag.SPRITE_OVERFLOW;
           break;
@@ -445,7 +456,7 @@ export class PPU {
 
   // Render a single pixel
   private renderPixel(): void {
-    const x = this.cycle - 1;
+    const screenX = this.cycle - 1;
     const y = this.scanline;
 
     let bgPixel = 0;
@@ -454,16 +465,29 @@ export class PPU {
     // Background rendering
     if (this.mask & MaskFlag.SHOW_BG) {
       // Check if we should render background in left 8 pixels
-      if (x >= 8 || (this.mask & MaskFlag.SHOW_LEFT_BG)) {
-        // Calculate fine X position within the tile
-        const fineX = (this.x + (this.cycle - 1)) % 8;
+      if (screenX >= 8 || (this.mask & MaskFlag.SHOW_LEFT_BG)) {
+        // Calculate scrolled position: which pixel in the 512-pixel wide nametable space
+        const scrolledX = screenX + this.x;
+        const pixelInTile = scrolledX & 0x07;
+        const tileOffset = scrolledX >> 3; // How many tiles from the starting tile
 
-        // Get nametable address from v register
-        const nametableAddr = 0x2000 | (this.v & 0x0fff);
-        const tileIndex = this.ppuRead(nametableAddr);
-
-        // Get fine Y from v register (bits 12-14)
+        // Get vertical scroll components from v (these don't change during scanline)
         const fineY = (this.v >> 12) & 0x07;
+        const coarseY = (this.v >> 5) & 0x1f;
+
+        // Calculate the actual coarse X by adding tile offset to starting position
+        // Handle wraparound and nametable switching
+        let coarseX = this.scanlineStartCoarseX + tileOffset;
+        let nametable = this.scanlineStartNametable;
+
+        if (coarseX >= 32) {
+          coarseX -= 32;
+          nametable ^= 1; // Switch horizontal nametable
+        }
+
+        // Build nametable address
+        const nametableAddr = 0x2000 | (nametable << 10) | (coarseY << 5) | coarseX;
+        const tileIndex = this.ppuRead(nametableAddr);
 
         // Calculate pattern table address
         const patternAddr = ((this.ctrl & CtrlFlag.BACKGROUND_PATTERN) ? 0x1000 : 0) +
@@ -473,16 +497,17 @@ export class PPU {
         const patternHi = this.ppuRead(patternAddr + 8);
 
         // Get pixel from pattern (bit 7 is leftmost pixel)
-        const bitPos = 7 - fineX;
+        const bitPos = 7 - pixelInTile;
         bgPixel = ((patternLo >> bitPos) & 1) | (((patternHi >> bitPos) & 1) << 1);
 
         // Get attribute byte for palette selection
-        const attrAddr = 0x23c0 | (this.v & 0x0c00) |
-          ((this.v >> 4) & 0x38) | ((this.v >> 2) & 0x07);
+        const attrX = coarseX >> 2;
+        const attrY = coarseY >> 2;
+        const attrAddr = 0x23c0 | (nametable << 10) | (attrY << 3) | attrX;
         const attrByte = this.ppuRead(attrAddr);
 
         // Calculate which quadrant of the attribute byte to use
-        const attrShift = ((this.v >> 4) & 0x04) | (this.v & 0x02);
+        const attrShift = ((coarseY & 2) << 1) | (coarseX & 2);
         bgPalette = (attrByte >> attrShift) & 0x03;
       }
     }
@@ -495,11 +520,11 @@ export class PPU {
 
     if (this.mask & MaskFlag.SHOW_SPRITES) {
       // Check if we should render sprites in left 8 pixels
-      if (x >= 8 || (this.mask & MaskFlag.SHOW_LEFT_SPRITES)) {
+      if (screenX >= 8 || (this.mask & MaskFlag.SHOW_LEFT_SPRITES)) {
         // Check each sprite to see if it covers this pixel
         for (let i = 0; i < this.spriteCount; i++) {
           const sprite = this.sprites[i];
-          const spriteX = x - sprite.x;
+          const spriteX = screenX - sprite.x;
 
           // Check if this pixel is within the sprite's horizontal range
           if (spriteX >= 0 && spriteX < 8) {
@@ -531,9 +556,9 @@ export class PPU {
     // Hit occurs when both background and sprite 0 pixels are opaque
     if (this.spriteZeroOnLine && spriteZeroRendered && bgPixel !== 0 && spritePixel !== 0) {
       // Sprite 0 hit doesn't trigger at x=255 or if rendering is off
-      if (x < 255 && (this.mask & MaskFlag.SHOW_BG) && (this.mask & MaskFlag.SHOW_SPRITES)) {
+      if (screenX < 255 && (this.mask & MaskFlag.SHOW_BG) && (this.mask & MaskFlag.SHOW_SPRITES)) {
         // Also doesn't trigger in left 8 pixels if either left clipping is enabled
-        if (x >= 8 || ((this.mask & MaskFlag.SHOW_LEFT_BG) && (this.mask & MaskFlag.SHOW_LEFT_SPRITES))) {
+        if (screenX >= 8 || ((this.mask & MaskFlag.SHOW_LEFT_BG) && (this.mask & MaskFlag.SHOW_LEFT_SPRITES))) {
           this.status |= StatusFlag.SPRITE_ZERO_HIT;
         }
       }
@@ -562,7 +587,7 @@ export class PPU {
       }
     }
 
-    this.frameBuffer[y * 256 + x] = paletteIndex;
+    this.frameBuffer[y * 256 + screenX] = paletteIndex;
   }
 
   shouldGenerateNMI(): boolean {
@@ -606,6 +631,10 @@ export class PPU {
   private copyX(): void {
     // v: ....A.. ...BCDEF <- t: ....A.. ...BCDEF
     this.v = (this.v & 0xfbe0) | (this.t & 0x041f);
+
+    // Save starting horizontal scroll for this scanline's rendering
+    this.scanlineStartCoarseX = this.v & 0x001f;
+    this.scanlineStartNametable = (this.v >> 10) & 0x03;
   }
 
   // Copy vertical bits from t to v
