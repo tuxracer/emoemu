@@ -21,13 +21,13 @@
 - [ ] Fine scroll timing accuracy
 
 ### PPU - Sprites
-- [ ] OAM (Object Attribute Memory) rendering
-- [ ] 8x8 sprite support
-- [ ] 8x16 sprite support
-- [ ] Sprite priority (front/behind background)
-- [ ] Sprite 0 hit detection
-- [ ] 8 sprites per scanline limit
-- [ ] Sprite overflow flag
+- [x] OAM (Object Attribute Memory) rendering
+- [x] 8x8 sprite support
+- [x] 8x16 sprite support
+- [x] Sprite priority (front/behind background)
+- [x] Sprite 0 hit detection
+- [x] 8 sprites per scanline limit
+- [x] Sprite overflow flag
 
 ### Memory
 - [x] 2KB internal RAM with mirroring
@@ -204,7 +204,7 @@
 
 ## Known Issues
 
-- [ ] Sprites not rendering (not implemented)
+- [x] ~~Sprites not rendering (not implemented)~~ - FIXED
 - [ ] Some games may have graphical glitches (timing)
 - [ ] No audio output
 - [ ] Key input uses timeout-based release (not proper key-up events)

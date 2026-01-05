@@ -41,6 +41,23 @@ export const StatusFlag = {
   VBLANK: 0x80,
 } as const;
 
+// Sprite attributes byte flags
+const SpriteAttr = {
+  PALETTE: 0x03,       // Bits 0-1: Palette (4 to 7)
+  PRIORITY: 0x20,      // Bit 5: Priority (0 = in front, 1 = behind)
+  FLIP_H: 0x40,        // Bit 6: Flip sprite horizontally
+  FLIP_V: 0x80,        // Bit 7: Flip sprite vertically
+} as const;
+
+// Sprite data for rendering (8 sprites per scanline max)
+interface SpriteData {
+  x: number;           // X position
+  patternLo: number;   // Low pattern byte
+  patternHi: number;   // High pattern byte
+  attributes: number;  // Sprite attributes
+  index: number;       // Original OAM index (for sprite 0 hit)
+}
+
 export class PPU {
   // Frame buffer (256x240 pixels, each pixel is a palette index)
   frameBuffer: Uint8Array = new Uint8Array(256 * 240);
@@ -64,6 +81,12 @@ export class PPU {
 
   // Data buffer for PPUDATA reads
   private dataBuffer: number = 0;
+
+  // Sprite rendering data
+  private spriteCount: number = 0;
+  private sprites: SpriteData[] = [];
+  private spriteZeroOnLine: boolean = false;
+  private spriteZeroBeingRendered: boolean = false;
 
   // Timing
   scanline: number = 0;
@@ -95,6 +118,10 @@ export class PPU {
     this.frameComplete = false;
     this.nmiOccurred = false;
     this.nmiOutput = false;
+    this.spriteCount = 0;
+    this.sprites = [];
+    this.spriteZeroOnLine = false;
+    this.spriteZeroBeingRendered = false;
   }
 
   connectCartridge(cartridge: Cartridge): void {
@@ -282,6 +309,10 @@ export class PPU {
         // Copy horizontal bits at start of each scanline
         if (this.cycle === 257) {
           this.copyX();
+          // Evaluate sprites for NEXT scanline
+          if (visibleLine || this.scanline === 261) {
+            this.evaluateSprites();
+          }
         }
       }
 
@@ -317,6 +348,101 @@ export class PPU {
     }
   }
 
+  // Evaluate sprites for the current scanline
+  private evaluateSprites(): void {
+    const nextScanline = this.scanline;
+    const spriteHeight = (this.ctrl & CtrlFlag.SPRITE_SIZE) ? 16 : 8;
+
+    this.spriteCount = 0;
+    this.sprites = [];
+    this.spriteZeroOnLine = false;
+
+    // Scan all 64 sprites in OAM
+    for (let i = 0; i < 64 && this.spriteCount < 8; i++) {
+      const oamIndex = i * 4;
+      const spriteY = this.oam[oamIndex];
+      const tileIndex = this.oam[oamIndex + 1];
+      const attributes = this.oam[oamIndex + 2];
+      const spriteX = this.oam[oamIndex + 3];
+
+      // Check if sprite is on this scanline
+      const diff = nextScanline - spriteY;
+      if (diff >= 0 && diff < spriteHeight) {
+        if (this.spriteCount < 8) {
+          // Fetch sprite pattern data
+          let row = diff;
+
+          // Handle vertical flip
+          if (attributes & SpriteAttr.FLIP_V) {
+            row = spriteHeight - 1 - row;
+          }
+
+          let patternAddr: number;
+
+          if (spriteHeight === 16) {
+            // 8x16 sprites: bit 0 of tile index selects pattern table
+            const table = (tileIndex & 0x01) * 0x1000;
+            const tile = tileIndex & 0xFE;
+            if (row < 8) {
+              patternAddr = table + (tile * 16) + row;
+            } else {
+              patternAddr = table + ((tile + 1) * 16) + (row - 8);
+            }
+          } else {
+            // 8x8 sprites: use PPUCTRL sprite pattern table
+            const table = (this.ctrl & CtrlFlag.SPRITE_PATTERN) ? 0x1000 : 0;
+            patternAddr = table + (tileIndex * 16) + row;
+          }
+
+          let patternLo = this.ppuRead(patternAddr);
+          let patternHi = this.ppuRead(patternAddr + 8);
+
+          // Handle horizontal flip
+          if (attributes & SpriteAttr.FLIP_H) {
+            patternLo = this.reverseBits(patternLo);
+            patternHi = this.reverseBits(patternHi);
+          }
+
+          this.sprites.push({
+            x: spriteX,
+            patternLo,
+            patternHi,
+            attributes,
+            index: i,
+          });
+
+          if (i === 0) {
+            this.spriteZeroOnLine = true;
+          }
+
+          this.spriteCount++;
+        }
+      }
+    }
+
+    // Check for sprite overflow (more than 8 sprites on scanline)
+    if (this.spriteCount >= 8) {
+      // Continue scanning for more sprites
+      for (let i = 8; i < 64; i++) {
+        const oamIndex = i * 4;
+        const spriteY = this.oam[oamIndex];
+        const diff = nextScanline - spriteY;
+        if (diff >= 0 && diff < spriteHeight) {
+          this.status |= StatusFlag.SPRITE_OVERFLOW;
+          break;
+        }
+      }
+    }
+  }
+
+  // Reverse bits in a byte (for horizontal flip)
+  private reverseBits(b: number): number {
+    b = ((b & 0xF0) >> 4) | ((b & 0x0F) << 4);
+    b = ((b & 0xCC) >> 2) | ((b & 0x33) << 2);
+    b = ((b & 0xAA) >> 1) | ((b & 0x55) << 1);
+    return b;
+  }
+
   // Render a single pixel
   private renderPixel(): void {
     const x = this.cycle - 1;
@@ -327,43 +453,113 @@ export class PPU {
 
     // Background rendering
     if (this.mask & MaskFlag.SHOW_BG) {
-      // Calculate fine X position within the tile
-      const fineX = (this.x + (this.cycle - 1)) % 8;
+      // Check if we should render background in left 8 pixels
+      if (x >= 8 || (this.mask & MaskFlag.SHOW_LEFT_BG)) {
+        // Calculate fine X position within the tile
+        const fineX = (this.x + (this.cycle - 1)) % 8;
 
-      // Get nametable address from v register
-      const nametableAddr = 0x2000 | (this.v & 0x0fff);
-      const tileIndex = this.ppuRead(nametableAddr);
+        // Get nametable address from v register
+        const nametableAddr = 0x2000 | (this.v & 0x0fff);
+        const tileIndex = this.ppuRead(nametableAddr);
 
-      // Get fine Y from v register (bits 12-14)
-      const fineY = (this.v >> 12) & 0x07;
+        // Get fine Y from v register (bits 12-14)
+        const fineY = (this.v >> 12) & 0x07;
 
-      // Calculate pattern table address
-      const patternAddr = ((this.ctrl & CtrlFlag.BACKGROUND_PATTERN) ? 0x1000 : 0) +
-        (tileIndex << 4) + fineY;
+        // Calculate pattern table address
+        const patternAddr = ((this.ctrl & CtrlFlag.BACKGROUND_PATTERN) ? 0x1000 : 0) +
+          (tileIndex << 4) + fineY;
 
-      const patternLo = this.ppuRead(patternAddr);
-      const patternHi = this.ppuRead(patternAddr + 8);
+        const patternLo = this.ppuRead(patternAddr);
+        const patternHi = this.ppuRead(patternAddr + 8);
 
-      // Get pixel from pattern (bit 7 is leftmost pixel)
-      const bitPos = 7 - fineX;
-      bgPixel = ((patternLo >> bitPos) & 1) | (((patternHi >> bitPos) & 1) << 1);
+        // Get pixel from pattern (bit 7 is leftmost pixel)
+        const bitPos = 7 - fineX;
+        bgPixel = ((patternLo >> bitPos) & 1) | (((patternHi >> bitPos) & 1) << 1);
 
-      // Get attribute byte for palette selection
-      const attrAddr = 0x23c0 | (this.v & 0x0c00) |
-        ((this.v >> 4) & 0x38) | ((this.v >> 2) & 0x07);
-      const attrByte = this.ppuRead(attrAddr);
+        // Get attribute byte for palette selection
+        const attrAddr = 0x23c0 | (this.v & 0x0c00) |
+          ((this.v >> 4) & 0x38) | ((this.v >> 2) & 0x07);
+        const attrByte = this.ppuRead(attrAddr);
 
-      // Calculate which quadrant of the attribute byte to use
-      const attrShift = ((this.v >> 4) & 0x04) | (this.v & 0x02);
-      bgPalette = (attrByte >> attrShift) & 0x03;
+        // Calculate which quadrant of the attribute byte to use
+        const attrShift = ((this.v >> 4) & 0x04) | (this.v & 0x02);
+        bgPalette = (attrByte >> attrShift) & 0x03;
+      }
     }
 
-    // Get final color from palette
+    // Sprite rendering
+    let spritePixel = 0;
+    let spritePalette = 0;
+    let spritePriority = false;
+    let spriteZeroRendered = false;
+
+    if (this.mask & MaskFlag.SHOW_SPRITES) {
+      // Check if we should render sprites in left 8 pixels
+      if (x >= 8 || (this.mask & MaskFlag.SHOW_LEFT_SPRITES)) {
+        // Check each sprite to see if it covers this pixel
+        for (let i = 0; i < this.spriteCount; i++) {
+          const sprite = this.sprites[i];
+          const spriteX = x - sprite.x;
+
+          // Check if this pixel is within the sprite's horizontal range
+          if (spriteX >= 0 && spriteX < 8) {
+            // Get pixel from sprite pattern
+            const bitPos = 7 - spriteX;
+            const pixel = ((sprite.patternLo >> bitPos) & 1) |
+                         (((sprite.patternHi >> bitPos) & 1) << 1);
+
+            // Only render non-transparent pixels
+            if (pixel !== 0) {
+              spritePixel = pixel;
+              spritePalette = (sprite.attributes & SpriteAttr.PALETTE) + 4; // Sprite palettes start at 4
+              spritePriority = (sprite.attributes & SpriteAttr.PRIORITY) !== 0;
+
+              // Check for sprite 0 hit
+              if (sprite.index === 0) {
+                spriteZeroRendered = true;
+              }
+
+              // First opaque sprite wins (lowest index has priority)
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Sprite 0 hit detection
+    // Hit occurs when both background and sprite 0 pixels are opaque
+    if (this.spriteZeroOnLine && spriteZeroRendered && bgPixel !== 0 && spritePixel !== 0) {
+      // Sprite 0 hit doesn't trigger at x=255 or if rendering is off
+      if (x < 255 && (this.mask & MaskFlag.SHOW_BG) && (this.mask & MaskFlag.SHOW_SPRITES)) {
+        // Also doesn't trigger in left 8 pixels if either left clipping is enabled
+        if (x >= 8 || ((this.mask & MaskFlag.SHOW_LEFT_BG) && (this.mask & MaskFlag.SHOW_LEFT_SPRITES))) {
+          this.status |= StatusFlag.SPRITE_ZERO_HIT;
+        }
+      }
+    }
+
+    // Compose final pixel based on priority
     let paletteIndex: number;
-    if (bgPixel !== 0) {
+
+    if (bgPixel === 0 && spritePixel === 0) {
+      // Both transparent - use background color
+      paletteIndex = this.ppuRead(0x3f00);
+    } else if (bgPixel === 0 && spritePixel !== 0) {
+      // Only sprite is opaque - use sprite
+      paletteIndex = this.ppuRead(0x3f00 + (spritePalette << 2) + spritePixel);
+    } else if (bgPixel !== 0 && spritePixel === 0) {
+      // Only background is opaque - use background
       paletteIndex = this.ppuRead(0x3f00 + (bgPalette << 2) + bgPixel);
     } else {
-      paletteIndex = this.ppuRead(0x3f00); // Background color
+      // Both opaque - priority determines which is shown
+      if (spritePriority) {
+        // Sprite behind background - show background
+        paletteIndex = this.ppuRead(0x3f00 + (bgPalette << 2) + bgPixel);
+      } else {
+        // Sprite in front of background - show sprite
+        paletteIndex = this.ppuRead(0x3f00 + (spritePalette << 2) + spritePixel);
+      }
     }
 
     this.frameBuffer[y * 256 + x] = paletteIndex;
