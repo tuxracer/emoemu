@@ -2,7 +2,8 @@ import { CPU } from './cpu/cpu.js';
 import { PPU } from './ppu/ppu.js';
 import { Bus } from './memory/bus.js';
 import { Cartridge } from './cartridge/cartridge.js';
-import { Controller, defaultKeyMap } from './input/controller.js';
+import { Controller } from './input/controller.js';
+import { InputManager } from './input/input-manager.js';
 import { TerminalRenderer } from './ppu/renderer.js';
 import { KittyRenderer } from './ppu/kitty-renderer.js';
 
@@ -34,6 +35,7 @@ export class Emulator {
   private cartridge: Cartridge;
   private controller1: Controller;
   private controller2: Controller;
+  private inputManager: InputManager;
   private renderer: Renderer;
   private renderMode: RenderMode;
 
@@ -41,10 +43,6 @@ export class Emulator {
   private frameCount: number = 0;
   private lastFrameTime: number = 0;
   private targetFrameTime: number = 1000 / 60; // ~16.67ms for 60 FPS
-
-  // Track held keys and their release timeouts
-  private heldKeys: Map<string, NodeJS.Timeout> = new Map();
-  private readonly keyReleaseDelay: number = 80; // ms - key repeat is ~30ms, so 80ms detects release
 
   constructor(options: EmulatorOptions) {
     // Initialize components
@@ -61,6 +59,9 @@ export class Emulator {
     this.bus.connectController(1, this.controller1);
     this.bus.connectController(2, this.controller2);
     this.ppu.connectCartridge(this.cartridge);
+
+    // Initialize input manager with controllers
+    this.inputManager = new InputManager(this.controller1, this.controller2);
 
     // Initialize renderer based on mode
     this.renderMode = options.renderMode ?? 'kitty';
@@ -134,12 +135,18 @@ export class Emulator {
     process.stdout.write(this.renderer.hideCursor());
     process.stdout.write(this.renderer.clearScreen());
 
-    // Setup input handling
+    // Setup input handling - start global keyboard listener
+    this.inputManager.start();
     this.setupInput();
 
     this.lastFrameTime = performance.now();
 
     const loop = (): void => {
+      // Check for quit from global keyboard listener
+      if (this.inputManager.shouldQuit()) {
+        this.stop();
+      }
+
       if (!this.running) {
         this.cleanup();
         return;
@@ -149,6 +156,9 @@ export class Emulator {
       const elapsed = now - this.lastFrameTime;
 
       if (elapsed >= this.targetFrameTime) {
+        // Update input state (no-op with true keyup, but kept for API)
+        this.inputManager.update();
+
         // Run emulation for one frame
         this.runFrame();
 
@@ -157,7 +167,7 @@ export class Emulator {
 
         // Calculate actual FPS and display on fixed status line
         const fps = 1000 / elapsed;
-        const buttons = this.controller1.getPressedButtons();
+        const buttons = this.inputManager.getPressedButtons();
         const statusRow = this.renderer.getStatusRow();
         process.stdout.write(this.renderer.moveCursorToRow(statusRow));
         process.stdout.write(`FPS: ${fps.toFixed(1)} | Frame: ${this.frameCount} | Keys: ${buttons.padEnd(20)}`);
@@ -184,92 +194,21 @@ export class Emulator {
     process.stdin.setEncoding('utf8');
 
     process.stdin.on('data', (key: string) => {
-      // Handle Ctrl+C
-      if (key === '\u0003') {
+      // Process input through InputManager
+      const result = this.inputManager.processInput(key);
+
+      if (result.quit) {
         this.stop();
-        return;
-      }
-
-      // Handle escape (but not arrow keys which start with escape)
-      if (key === '\u001b') {
-        this.stop();
-        return;
-      }
-
-      // Handle each key in the input (allows multiple simultaneous keys)
-      // Arrow keys come as escape sequences, handle them specially
-      const keys = this.parseKeys(key);
-
-      for (const k of keys) {
-        const button = defaultKeyMap[k];
-        if (button !== undefined) {
-          this.handleKeyPress(k, button);
-        }
       }
     });
   }
 
-  // Parse input into individual keys (handles escape sequences for arrow keys)
-  private parseKeys(input: string): string[] {
-    const keys: string[] = [];
-    let i = 0;
-
-    while (i < input.length) {
-      // Check for arrow key escape sequences
-      if (input[i] === '\u001b' && input[i + 1] === '[') {
-        if (input[i + 2] === 'A') {
-          keys.push('\u001b[A'); // Up arrow
-          i += 3;
-          continue;
-        } else if (input[i + 2] === 'B') {
-          keys.push('\u001b[B'); // Down arrow
-          i += 3;
-          continue;
-        } else if (input[i + 2] === 'C') {
-          keys.push('\u001b[C'); // Right arrow
-          i += 3;
-          continue;
-        } else if (input[i + 2] === 'D') {
-          keys.push('\u001b[D'); // Left arrow
-          i += 3;
-          continue;
-        }
-      }
-
-      // Regular character
-      keys.push(input[i]);
-      i++;
-    }
-
-    return keys;
-  }
-
-  // Handle key press with hold detection
-  private handleKeyPress(key: string, button: number): void {
-    // Clear any existing release timeout for this key
-    const existingTimeout = this.heldKeys.get(key);
-    if (existingTimeout) {
-      clearTimeout(existingTimeout);
-    }
-
-    // Press the button (may already be pressed, that's fine)
-    this.controller1.setButton(button, true);
-
-    // Set a new timeout to release the key if no repeat events come
-    const timeout = setTimeout(() => {
-      this.controller1.setButton(button, false);
-      this.heldKeys.delete(key);
-    }, this.keyReleaseDelay);
-
-    this.heldKeys.set(key, timeout);
-  }
-
   private cleanup(): void {
-    // Clear all pending key release timeouts
-    for (const timeout of this.heldKeys.values()) {
-      clearTimeout(timeout);
-    }
-    this.heldKeys.clear();
+    // Stop global keyboard listener
+    this.inputManager.stop();
+
+    // Clear input state
+    this.inputManager.clear();
 
     // Clear Kitty graphics if using Kitty renderer
     if (this.renderMode === 'kitty') {

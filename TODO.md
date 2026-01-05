@@ -95,20 +95,22 @@
 ### NES Controller Behavior
 The NES controller uses a 4021 shift register that captures the state of all 8 buttons each frame when polled. Buttons can be held continuously (not rapid presses) and multiple buttons can be pressed simultaneously.
 
+**Platform Note:** Input uses Kitty keyboard protocol for true keydown/keyup events. Requires Kitty terminal or a terminal that supports the Kitty keyboard protocol.
+
 - [x] Shift register emulation ($4016, $4017)
 - [x] Button state capture on strobe
 - [x] Sequential bit reading
-- [ ] True button hold support (not timeout-based release)
-- [ ] Simultaneous multi-button input
-- [ ] Per-frame state polling accuracy
+- [x] True button hold support (using Kitty keyboard protocol)
+- [x] Simultaneous multi-button input
+- [x] Per-frame state polling accuracy (InputManager.update() called each frame)
 
 ### Controller
 - [x] Basic keyboard input
 - [x] D-pad mapping (WASD + arrows)
 - [x] A/B button mapping
 - [x] Start/Select mapping
-- [ ] Proper key-down/key-up handling (currently uses timeout)
-- [ ] Simultaneous button press support
+- [x] Proper key-down/key-up handling (Kitty keyboard protocol)
+- [x] Simultaneous button press support
 - [ ] Controller 2 support
 - [ ] Configurable key bindings (config file)
 
@@ -217,7 +219,7 @@ The NES controller uses a 4021 shift register that captures the state of all 8 b
 - [x] ~~Sprites not rendering (not implemented)~~ - FIXED
 - [ ] Some games may have graphical glitches (timing)
 - [ ] No audio output
-- [ ] Key input uses timeout-based release (not proper key-up events)
+- [x] ~~Key input uses timeout-based release~~ - FIXED (now uses Kitty keyboard protocol)
 
 ---
 
