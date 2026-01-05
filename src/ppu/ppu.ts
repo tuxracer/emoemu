@@ -255,12 +255,41 @@ export class PPU {
 
   // Run one PPU cycle
   clock(): void {
+    const renderingEnabled = (this.mask & (MaskFlag.SHOW_BG | MaskFlag.SHOW_SPRITES)) !== 0;
+    const visibleLine = this.scanline < 240;
+    const preLine = this.scanline === 261;
+    const visibleCycle = this.cycle >= 1 && this.cycle <= 256;
+    const fetchCycle = this.cycle >= 1 && this.cycle <= 256 || this.cycle >= 321 && this.cycle <= 336;
+
     // Visible scanlines (0-239)
-    if (this.scanline < 240) {
+    if (visibleLine && visibleCycle) {
       this.renderPixel();
     }
 
-    // Post-render scanline (240) - idle
+    // Scrolling updates during rendering
+    if (renderingEnabled) {
+      if (visibleLine || preLine) {
+        // Increment horizontal scroll after each tile
+        if (fetchCycle && (this.cycle % 8 === 0)) {
+          this.incrementX();
+        }
+
+        // Increment vertical scroll at end of scanline
+        if (this.cycle === 256) {
+          this.incrementY();
+        }
+
+        // Copy horizontal bits at start of each scanline
+        if (this.cycle === 257) {
+          this.copyX();
+        }
+      }
+
+      // Copy vertical bits during pre-render scanline
+      if (preLine && this.cycle >= 280 && this.cycle <= 304) {
+        this.copyY();
+      }
+    }
 
     // Vertical blank starts at scanline 241
     if (this.scanline === 241 && this.cycle === 1) {
@@ -269,13 +298,11 @@ export class PPU {
     }
 
     // Pre-render scanline (261)
-    if (this.scanline === 261) {
-      if (this.cycle === 1) {
-        this.status &= ~StatusFlag.VBLANK;
-        this.status &= ~StatusFlag.SPRITE_ZERO_HIT;
-        this.status &= ~StatusFlag.SPRITE_OVERFLOW;
-        this.nmiOccurred = false;
-      }
+    if (preLine && this.cycle === 1) {
+      this.status &= ~StatusFlag.VBLANK;
+      this.status &= ~StatusFlag.SPRITE_ZERO_HIT;
+      this.status &= ~StatusFlag.SPRITE_OVERFLOW;
+      this.nmiOccurred = false;
     }
 
     // Advance cycle/scanline
@@ -292,49 +319,102 @@ export class PPU {
 
   // Render a single pixel
   private renderPixel(): void {
-    if (this.cycle >= 1 && this.cycle <= 256) {
-      const x = this.cycle - 1;
-      const y = this.scanline;
+    const x = this.cycle - 1;
+    const y = this.scanline;
 
-      let bgPixel = 0;
-      let bgPalette = 0;
+    let bgPixel = 0;
+    let bgPalette = 0;
 
-      // Background rendering
-      if (this.mask & MaskFlag.SHOW_BG) {
-        // Simplified background rendering
-        const nametableAddr = 0x2000 | (this.v & 0x0fff);
-        const tileIndex = this.ppuRead(nametableAddr);
+    // Background rendering
+    if (this.mask & MaskFlag.SHOW_BG) {
+      // Calculate fine X position within the tile
+      const fineX = (this.x + (this.cycle - 1)) % 8;
 
-        const patternAddr = ((this.ctrl & CtrlFlag.BACKGROUND_PATTERN) ? 0x1000 : 0) +
-          (tileIndex << 4) + ((this.v >> 12) & 0x07);
+      // Get nametable address from v register
+      const nametableAddr = 0x2000 | (this.v & 0x0fff);
+      const tileIndex = this.ppuRead(nametableAddr);
 
-        const patternLo = this.ppuRead(patternAddr);
-        const patternHi = this.ppuRead(patternAddr + 8);
+      // Get fine Y from v register (bits 12-14)
+      const fineY = (this.v >> 12) & 0x07;
 
-        const bitPos = 7 - this.x;
-        bgPixel = ((patternLo >> bitPos) & 1) | (((patternHi >> bitPos) & 1) << 1);
+      // Calculate pattern table address
+      const patternAddr = ((this.ctrl & CtrlFlag.BACKGROUND_PATTERN) ? 0x1000 : 0) +
+        (tileIndex << 4) + fineY;
 
-        // Get attribute
-        const attrAddr = 0x23c0 | (this.v & 0x0c00) |
-          ((this.v >> 4) & 0x38) | ((this.v >> 2) & 0x07);
-        const attrByte = this.ppuRead(attrAddr);
-        const attrShift = ((this.v >> 4) & 0x04) | (this.v & 0x02);
-        bgPalette = (attrByte >> attrShift) & 0x03;
-      }
+      const patternLo = this.ppuRead(patternAddr);
+      const patternHi = this.ppuRead(patternAddr + 8);
 
-      // Get final color from palette
-      let paletteIndex = 0;
-      if (bgPixel !== 0) {
-        paletteIndex = this.ppuRead(0x3f00 + (bgPalette << 2) + bgPixel);
-      } else {
-        paletteIndex = this.ppuRead(0x3f00);
-      }
+      // Get pixel from pattern (bit 7 is leftmost pixel)
+      const bitPos = 7 - fineX;
+      bgPixel = ((patternLo >> bitPos) & 1) | (((patternHi >> bitPos) & 1) << 1);
 
-      this.frameBuffer[y * 256 + x] = paletteIndex;
+      // Get attribute byte for palette selection
+      const attrAddr = 0x23c0 | (this.v & 0x0c00) |
+        ((this.v >> 4) & 0x38) | ((this.v >> 2) & 0x07);
+      const attrByte = this.ppuRead(attrAddr);
+
+      // Calculate which quadrant of the attribute byte to use
+      const attrShift = ((this.v >> 4) & 0x04) | (this.v & 0x02);
+      bgPalette = (attrByte >> attrShift) & 0x03;
     }
+
+    // Get final color from palette
+    let paletteIndex: number;
+    if (bgPixel !== 0) {
+      paletteIndex = this.ppuRead(0x3f00 + (bgPalette << 2) + bgPixel);
+    } else {
+      paletteIndex = this.ppuRead(0x3f00); // Background color
+    }
+
+    this.frameBuffer[y * 256 + x] = paletteIndex;
   }
 
   shouldGenerateNMI(): boolean {
     return this.nmiOccurred && this.nmiOutput;
+  }
+
+  clearNMI(): void {
+    this.nmiOccurred = false;
+  }
+
+  // Increment coarse X (horizontal scroll)
+  private incrementX(): void {
+    if ((this.v & 0x001f) === 31) {
+      this.v &= ~0x001f; // Clear coarse X
+      this.v ^= 0x0400;  // Switch horizontal nametable
+    } else {
+      this.v++;
+    }
+  }
+
+  // Increment Y (vertical scroll)
+  private incrementY(): void {
+    if ((this.v & 0x7000) !== 0x7000) {
+      this.v += 0x1000; // Increment fine Y
+    } else {
+      this.v &= ~0x7000; // Clear fine Y
+      let y = (this.v & 0x03e0) >> 5; // Coarse Y
+      if (y === 29) {
+        y = 0;
+        this.v ^= 0x0800; // Switch vertical nametable
+      } else if (y === 31) {
+        y = 0;
+      } else {
+        y++;
+      }
+      this.v = (this.v & ~0x03e0) | (y << 5);
+    }
+  }
+
+  // Copy horizontal bits from t to v
+  private copyX(): void {
+    // v: ....A.. ...BCDEF <- t: ....A.. ...BCDEF
+    this.v = (this.v & 0xfbe0) | (this.t & 0x041f);
+  }
+
+  // Copy vertical bits from t to v
+  private copyY(): void {
+    // v: GHIA.BC DEF..... <- t: GHIA.BC DEF.....
+    this.v = (this.v & 0x841f) | (this.t & 0x7be0);
   }
 }
