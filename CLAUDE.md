@@ -4,6 +4,8 @@
 
 A terminal-based Nintendo Entertainment System (NES) emulator written in TypeScript. The emulator renders graphics using Unicode/ASCII characters in the terminal and accepts keyboard input for controls.
 
+**Platform Compatibility:** This application should be compatible when running in the terminal on macOS, Windows, and Linux.
+
 ## Technical Stack
 
 - **Language:** TypeScript
@@ -117,6 +119,9 @@ Select        Shift
 - Support key remapping via config
 - Handle simultaneous key presses
 - Emulate controller shift register ($4016, $4017)
+
+**NES Controller Behavior:**
+The NES supports multiple buttons being pressed simultaneously and buttons being held down continuously (not as rapid presses). The controller uses a shift register (the 4021 chip) that captures the current state of all eight buttons each frame when the console polls input. When a button is held, the NES reads it as pressed (returning a 1) on every frame until released. The emulator must accurately model this behavior to ensure games that require holding buttons (running, charging attacks, etc.) work correctly.
 
 ## Project Structure
 

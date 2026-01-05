@@ -92,6 +92,16 @@
 
 ## Milestone 4: Input & Controls
 
+### NES Controller Behavior
+The NES controller uses a 4021 shift register that captures the state of all 8 buttons each frame when polled. Buttons can be held continuously (not rapid presses) and multiple buttons can be pressed simultaneously.
+
+- [x] Shift register emulation ($4016, $4017)
+- [x] Button state capture on strobe
+- [x] Sequential bit reading
+- [ ] True button hold support (not timeout-based release)
+- [ ] Simultaneous multi-button input
+- [ ] Per-frame state polling accuracy
+
 ### Controller
 - [x] Basic keyboard input
 - [x] D-pad mapping (WASD + arrows)
