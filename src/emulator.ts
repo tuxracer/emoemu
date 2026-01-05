@@ -66,8 +66,9 @@ export class Emulator {
     for (let i = 0; i < cpuCycles * 3; i++) {
       this.ppu.clock();
 
-      // Check for NMI
+      // Check for NMI (only trigger once)
       if (this.ppu.shouldGenerateNMI()) {
+        this.ppu.clearNMI();
         this.cpu.nmi();
       }
     }
