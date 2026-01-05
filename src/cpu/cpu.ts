@@ -1,4 +1,5 @@
 import { Bus } from '../memory/bus.js';
+import { opcodes } from './opcodes.js';
 
 export interface CPUState {
   a: number;      // Accumulator
@@ -135,13 +136,25 @@ export class CPU {
   // Execute one instruction
   step(): number {
     // Read opcode and advance PC
-    this.read(this.pc);
+    const opcode = this.read(this.pc);
     this.pc = (this.pc + 1) & 0xffff;
 
-    // TODO: Implement opcode execution
-    // This will be filled in when we implement opcodes.ts
+    // Look up instruction
+    const instruction = opcodes[opcode];
 
-    const cycles = this.cycles || 1; // Default to 1 cycle if not set
+    if (instruction) {
+      // Set base cycle count
+      this.cycles = instruction.cycles;
+
+      // Execute the instruction handler
+      instruction.handler(this, instruction.mode);
+    } else {
+      // Unknown opcode - treat as NOP with 2 cycles
+      // Many unofficial opcodes exist; for now we skip them
+      this.cycles = 2;
+    }
+
+    const cycles = this.cycles;
     this.totalCycles += cycles;
     this.cycles = 0;
 
