@@ -157,9 +157,10 @@ export class Emulator {
 
         // Calculate actual FPS and display on fixed status line
         const fps = 1000 / elapsed;
+        const buttons = this.controller1.getPressedButtons();
         const statusRow = this.renderer.getStatusRow();
         process.stdout.write(this.renderer.moveCursorToRow(statusRow));
-        process.stdout.write(`FPS: ${fps.toFixed(1)} | Frame: ${this.frameCount}`);
+        process.stdout.write(`FPS: ${fps.toFixed(1)} | Frame: ${this.frameCount} | Keys: ${buttons.padEnd(20)}`);
 
         this.lastFrameTime = now;
       }

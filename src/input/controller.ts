@@ -51,6 +51,18 @@ export class Controller {
       }
     }
   }
+
+  // Get string representation of pressed buttons for display
+  getPressedButtons(): string {
+    const buttonNames = ['A', 'B', 'Sel', 'Sta', 'U', 'D', 'L', 'R'];
+    const pressed: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      if (this.buttons[i]) {
+        pressed.push(buttonNames[i]);
+      }
+    }
+    return pressed.length > 0 ? pressed.join(' ') : '-';
+  }
 }
 
 // Default keyboard mappings
@@ -60,21 +72,28 @@ export const defaultKeyMap: Record<string, Button> = {
   s: Button.Down,
   a: Button.Left,
   d: Button.Right,
+  W: Button.Up,
+  S: Button.Down,
+  A: Button.Left,
+  D: Button.Right,
 
-  // Arrow keys alternative
-  ArrowUp: Button.Up,
-  ArrowDown: Button.Down,
-  ArrowLeft: Button.Left,
-  ArrowRight: Button.Right,
+  // Arrow keys (escape sequences from terminal)
+  '\u001b[A': Button.Up,
+  '\u001b[B': Button.Down,
+  '\u001b[D': Button.Left,
+  '\u001b[C': Button.Right,
 
   // Action buttons
   k: Button.A,
   z: Button.A,
   j: Button.B,
   x: Button.B,
+  K: Button.A,
+  Z: Button.A,
+  J: Button.B,
+  X: Button.B,
 
   // Start/Select
-  Enter: Button.Start,
-  Shift: Button.Select,
-  ShiftRight: Button.Select,
+  '\r': Button.Start,      // Enter key
+  ' ': Button.Select,      // Space key
 };
