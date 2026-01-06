@@ -23,11 +23,12 @@ const KITTY_KEY_TO_BUTTON: Map<number, Button> = new Map([
 ]);
 
 // Special keys use different codes in Kitty protocol
+// See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#functional-key-definitions
 const KITTY_SPECIAL_KEYS: Map<number, Button> = new Map([
   [57352, Button.Up],    // Arrow Up
   [57353, Button.Down],  // Arrow Down
-  [57351, Button.Left],  // Arrow Left
-  [57350, Button.Right], // Arrow Right (these are Kitty's functional key codes)
+  [57350, Button.Left],  // Arrow Left
+  [57351, Button.Right], // Arrow Right
 ]);
 
 /**
@@ -134,19 +135,26 @@ export class InputManager {
           continue;
         }
 
-        // Check for legacy arrow keys: \x1b[A, \x1b[B, \x1b[C, \x1b[D
-        // These shouldn't appear in Kitty mode but handle as fallback
-        const arrowMatch = this.inputBuffer.match(/^\x1b\[([ABCD])/);
+        // Check for arrow keys in various formats:
+        // Legacy: \x1b[A, \x1b[B, \x1b[C, \x1b[D
+        // Kitty enhanced: \x1b[1;modifiers[ABCD] or \x1b[1;modifiers:event_type[ABCD]
+        const arrowMatch = this.inputBuffer.match(/^\x1b\[(?:1;(\d+)(?::(\d+))?)?([ABCD])/);
         if (arrowMatch) {
           const arrowMap: Record<string, { code: number; button: Button }> = {
             'A': { code: 57352, button: Button.Up },
             'B': { code: 57353, button: Button.Down },
-            'C': { code: 57350, button: Button.Right },
-            'D': { code: 57351, button: Button.Left },
+            'C': { code: 57351, button: Button.Right },
+            'D': { code: 57350, button: Button.Left },
           };
-          const arrow = arrowMap[arrowMatch[1]];
+          const eventType = arrowMatch[2] ? parseInt(arrowMatch[2], 10) : 1; // 1=press, 2=repeat, 3=release
+          const arrowKey = arrowMatch[3];
+          const arrow = arrowMap[arrowKey];
           if (arrow) {
-            this.handleKeyDown(arrow.code, arrow.button);
+            if (eventType === 3) {
+              this.handleKeyUp(arrow.code, arrow.button);
+            } else {
+              this.handleKeyDown(arrow.code, arrow.button);
+            }
           }
           this.inputBuffer = this.inputBuffer.slice(arrowMatch[0].length);
           continue;
