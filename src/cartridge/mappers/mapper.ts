@@ -24,6 +24,8 @@ export function createMapper(mapperNumber: number, cartridge: Cartridge): Mapper
       return new Mapper1(cartridge);
     case 2:
       return new Mapper2(cartridge);
+    case 3:
+      return new Mapper3(cartridge);
     case 4:
       return new Mapper4(cartridge);
     default:
@@ -269,6 +271,53 @@ export class Mapper2 implements Mapper {
     if (address < 0x2000 && this.cartridge.chrRom.length === 0) {
       this.cartridge.chrRam[address] = data;
     }
+  }
+}
+
+// Mapper 3: CNROM
+// Simple CHR ROM bank switching, used by ~150 games including Arkanoid, Gradius
+export class Mapper3 implements Mapper {
+  private cartridge: Cartridge;
+  private chrBank: number = 0;
+
+  constructor(cartridge: Cartridge) {
+    this.cartridge = cartridge;
+  }
+
+  cpuRead(address: number): number {
+    if (address >= 0x8000) {
+      // PRG ROM - same as NROM (16KB or 32KB, mirrored if 16KB)
+      const prgAddr = address & (this.cartridge.prgRom.length > 16384 ? 0x7fff : 0x3fff);
+      return this.cartridge.prgRom[prgAddr];
+    } else if (address >= 0x6000) {
+      // PRG RAM
+      return this.cartridge.prgRam[address & 0x1fff];
+    }
+    return 0;
+  }
+
+  cpuWrite(address: number, data: number): void {
+    if (address >= 0x8000) {
+      // Select CHR bank (8KB banks)
+      // Mask to number of banks available (typically 2-4 bits used)
+      const bankCount = Math.max(1, this.cartridge.chrRom.length / 8192);
+      this.chrBank = data & (bankCount - 1);
+    } else if (address >= 0x6000) {
+      // PRG RAM
+      this.cartridge.prgRam[address & 0x1fff] = data;
+    }
+  }
+
+  ppuRead(address: number): number {
+    if (address < 0x2000) {
+      // CHR ROM with bank switching
+      return this.cartridge.chrRom[(this.chrBank * 8192 + address) % this.cartridge.chrRom.length];
+    }
+    return 0;
+  }
+
+  ppuWrite(address: number, data: number): void {
+    // CNROM uses CHR ROM, not RAM, so writes are ignored
   }
 }
 

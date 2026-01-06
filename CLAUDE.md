@@ -88,9 +88,10 @@ interface Mapper {
 - Mapper 0 (NROM): Direct ROM access, handles 16KB/32KB PRG
 - Mapper 1 (MMC1): Shift register banking, 16KB/32KB PRG modes, 4KB/8KB CHR
 - Mapper 2 (UxROM): Simple 16KB PRG bank switching
-- Mapper 4 (MMC3): 8KB PRG banks, 1KB CHR banks, scanline IRQ via A12 monitoring
+- Mapper 3 (CNROM): Simple 8KB CHR bank switching
+- Mapper 4 (MMC3): 8KB PRG banks, 1KB CHR banks, scanline IRQ
 
-**Not implemented:** Mapper 3 (CNROM), 7 (AxROM), 9 (MMC2)
+**Not implemented:** Mapper 7 (AxROM), 9 (MMC2)
 
 ### Input System
 
