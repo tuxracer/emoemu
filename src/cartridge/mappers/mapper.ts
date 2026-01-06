@@ -28,6 +28,8 @@ export function createMapper(mapperNumber: number, cartridge: Cartridge): Mapper
       return new Mapper3(cartridge);
     case 4:
       return new Mapper4(cartridge);
+    case 7:
+      return new Mapper7(cartridge);
     default:
       console.warn(`Mapper ${mapperNumber} not implemented, using Mapper 0`);
       return new Mapper0(cartridge);
@@ -318,6 +320,57 @@ export class Mapper3 implements Mapper {
 
   ppuWrite(address: number, data: number): void {
     // CNROM uses CHR ROM, not RAM, so writes are ignored
+  }
+}
+
+// Mapper 7: AxROM
+// 32KB PRG bank switching with single-screen mirroring
+// Used by Battletoads, Marble Madness, Wizards & Warriors
+export class Mapper7 implements Mapper {
+  private cartridge: Cartridge;
+  private prgBank: number = 0;
+  mirrorMode: number = 2; // Single-screen lower by default
+
+  constructor(cartridge: Cartridge) {
+    this.cartridge = cartridge;
+  }
+
+  cpuRead(address: number): number {
+    if (address >= 0x8000) {
+      // 32KB switchable PRG bank
+      const bankOffset = this.prgBank * 32768;
+      return this.cartridge.prgRom[(bankOffset + (address - 0x8000)) % this.cartridge.prgRom.length];
+    } else if (address >= 0x6000) {
+      // PRG RAM (not all AxROM boards have this)
+      return this.cartridge.prgRam[address & 0x1fff];
+    }
+    return 0;
+  }
+
+  cpuWrite(address: number, data: number): void {
+    if (address >= 0x8000) {
+      // Bits 0-2: PRG bank select (some variants use more bits)
+      this.prgBank = data & 0x07;
+      // Bit 4: Nametable select (0 = single-screen lower, 1 = single-screen upper)
+      this.mirrorMode = (data & 0x10) ? 3 : 2;
+    } else if (address >= 0x6000) {
+      this.cartridge.prgRam[address & 0x1fff] = data;
+    }
+  }
+
+  ppuRead(address: number): number {
+    if (address < 0x2000) {
+      // AxROM uses CHR RAM
+      return this.cartridge.chrRam[address];
+    }
+    return 0;
+  }
+
+  ppuWrite(address: number, data: number): void {
+    if (address < 0x2000) {
+      // CHR RAM is writable
+      this.cartridge.chrRam[address] = data;
+    }
   }
 }
 
