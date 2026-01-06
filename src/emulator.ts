@@ -150,9 +150,14 @@ export class Emulator {
     process.stdout.write(this.renderer.hideCursor());
     process.stdout.write(this.renderer.clearScreen());
 
-    // Setup input handling - start global keyboard listener
-    this.inputManager.start();
-    this.setupInput();
+    // Setup stdin first (needed for Kitty detection)
+    this.setupStdin();
+
+    // Detect Kitty protocol and start keyboard listener
+    await this.inputManager.start();
+
+    // Now attach the main input handler
+    this.setupInputHandler();
 
     // Start gamepad manager if available
     if (this.gamepadManager) {
@@ -207,13 +212,15 @@ export class Emulator {
     this.running = false;
   }
 
-  private setupInput(): void {
+  private setupStdin(): void {
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
     }
     process.stdin.resume();
     process.stdin.setEncoding('utf8');
+  }
 
+  private setupInputHandler(): void {
     process.stdin.on('data', (key: string) => {
       // Process input through InputManager
       const result = this.inputManager.processInput(key);
