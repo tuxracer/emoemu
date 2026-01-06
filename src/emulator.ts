@@ -7,7 +7,7 @@ import { InputManager } from './input/input-manager.js';
 import { TerminalRenderer } from './ppu/renderer.js';
 import { KittyRenderer } from './ppu/kitty-renderer.js';
 
-export type RenderMode = 'terminal' | 'kitty';
+export type RenderMode = 'terminal' | 'kitty' | 'ascii';
 
 // Common renderer interface
 interface Renderer {
@@ -69,6 +69,13 @@ export class Emulator {
     if (this.renderMode === 'kitty') {
       this.renderer = new KittyRenderer({
         scale: options.scale ?? 2,
+      });
+    } else if (this.renderMode === 'ascii') {
+      this.renderer = new TerminalRenderer({
+        width: options.width ?? 128,
+        height: options.height ?? 60,
+        useColor: options.useColor ?? true,
+        asciiMode: true,
       });
     } else {
       this.renderer = new TerminalRenderer({

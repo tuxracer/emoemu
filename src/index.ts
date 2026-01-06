@@ -10,11 +10,12 @@ Usage: tui-nes <rom.nes> [options]
 
 Options:
   --kitty         Use Kitty graphics protocol (default, best quality)
-  --terminal      Use terminal character rendering (fallback)
+  --terminal      Use terminal character rendering (Unicode half-blocks)
+  --ascii         Use colored ASCII character rendering
+  --no-color      Disable colors (use with --ascii or --terminal)
   --scale <n>     Scale factor for Kitty mode (default: 2)
-  --width <n>     Set display width in characters (terminal mode)
-  --height <n>    Set display height in characters (terminal mode)
-  --no-color      Disable colors (terminal ASCII mode)
+  --width <n>     Set display width in characters (terminal/ascii mode)
+  --height <n>    Set display height in characters (terminal/ascii mode)
   --help          Show this help message
 
 Controls:
@@ -63,6 +64,8 @@ function parseArgs(args: string[]): {
       result.height = parseInt(args[++i], 10);
     } else if (arg === '--scale' && args[i + 1]) {
       result.scale = parseInt(args[++i], 10);
+    } else if (arg === '--ascii') {
+      result.renderMode = 'ascii';
     } else if (arg === '--no-color') {
       result.useColor = false;
     } else if (arg === '--kitty') {
@@ -151,9 +154,12 @@ async function main(): Promise<void> {
   console.log(`Render mode: ${options.renderMode}`);
   if (options.renderMode === 'kitty') {
     console.log(`Scale: ${options.scale}x (${256 * options.scale}x${240 * options.scale} pixels)`);
+  } else if (options.renderMode === 'ascii') {
+    console.log(`Display: ${displaySize.width}x${displaySize.height}${options.width === undefined ? ' (auto-fit)' : ''}`);
+    console.log(`Mode: ASCII characters${options.useColor ? ' with color' : ' (grayscale)'}`);
   } else {
     console.log(`Display: ${displaySize.width}x${displaySize.height}${options.width === undefined ? ' (auto-fit)' : ''}`);
-    console.log(`Color: ${options.useColor ? 'enabled' : 'disabled'}`);
+    console.log('Mode: Unicode half-blocks with color');
   }
   console.log('');
   console.log('Press Escape or Ctrl+C to quit');
