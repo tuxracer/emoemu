@@ -10,6 +10,10 @@ export interface Mapper {
   // IRQ support for mappers like MMC3
   irqPending?(): boolean;
   acknowledgeIrq?(): void;
+
+  // Scanline counter notification (for MMC3)
+  // Called by PPU at the point where scanline counter should clock
+  notifyScanline?(scanline: number, renderingEnabled: boolean): void;
 }
 
 export function createMapper(mapperNumber: number, cartridge: Cartridge): Mapper {
@@ -294,10 +298,6 @@ export class Mapper4 implements Mapper {
   private irqReload: boolean = false;
   private irqPendingFlag: boolean = false;
 
-  // A12 state tracking for scanline counter
-  private lastA12: number = 0;
-  private a12LowCycles: number = 0;
-
   // PRG bank count (8KB banks)
   private prgBankCount: number;
 
@@ -305,6 +305,20 @@ export class Mapper4 implements Mapper {
     this.cartridge = cartridge;
     this.mirrorMode = cartridge.header.mirrorMode;
     this.prgBankCount = Math.floor(cartridge.prgRom.length / 8192);
+  }
+
+  /**
+   * Called by PPU once per scanline at the point where MMC3 counter should clock.
+   * This is a simplified approach that works for most games.
+   * Real hardware uses A12 rising edge detection, but that's complex to emulate
+   * accurately given our per-pixel rendering approach.
+   */
+  notifyScanline(scanline: number, renderingEnabled: boolean): void {
+    // Only clock counter during visible and pre-render scanlines when rendering is enabled
+    // Scanlines 0-239 are visible, 261 is pre-render
+    if (renderingEnabled && (scanline < 240 || scanline === 261)) {
+      this.clockIrqCounter();
+    }
   }
 
   cpuRead(address: number): number {
@@ -402,9 +416,6 @@ export class Mapper4 implements Mapper {
 
   ppuRead(address: number): number {
     if (address < 0x2000) {
-      // Track A12 for scanline counter
-      this.checkA12(address);
-
       const bank = this.getChrBank(address);
 
       if (this.cartridge.chrRom.length > 0) {
@@ -417,9 +428,6 @@ export class Mapper4 implements Mapper {
 
   ppuWrite(address: number, data: number): void {
     if (address < 0x2000) {
-      // Track A12 for scanline counter
-      this.checkA12(address);
-
       if (this.cartridge.chrRom.length === 0) {
         this.cartridge.chrRam[address] = data;
       }
@@ -461,31 +469,7 @@ export class Mapper4 implements Mapper {
   }
 
   /**
-   * Check A12 line for scanline counter
-   * MMC3 counts rising edges of PPU A12, which typically happens once per scanline
-   * when the PPU switches from background ($0xxx) to sprite ($1xxx) pattern tables
-   */
-  private checkA12(address: number): void {
-    const a12 = (address >> 12) & 1;
-
-    // Detect rising edge of A12 (0 -> 1)
-    // The counter clocks when A12 rises after being low for a certain time
-    if (a12 === 0) {
-      this.a12LowCycles++;
-    } else if (this.lastA12 === 0 && this.a12LowCycles >= 3) {
-      // Rising edge detected after A12 was low - clock the counter
-      this.clockIrqCounter();
-    }
-
-    if (a12 === 1) {
-      this.a12LowCycles = 0;
-    }
-
-    this.lastA12 = a12;
-  }
-
-  /**
-   * Clock the IRQ counter (called on A12 rising edge)
+   * Clock the IRQ counter (called once per scanline)
    */
   private clockIrqCounter(): void {
     if (this.irqCounter === 0 || this.irqReload) {

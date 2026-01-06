@@ -320,6 +320,12 @@ export class PPU {
             this.evaluateSprites();
           }
         }
+
+        // Notify mapper of scanline for IRQ counter (MMC3)
+        // This happens at cycle 260, during sprite fetching
+        if (this.cycle === 260) {
+          this.cartridge?.notifyScanline(this.scanline, renderingEnabled);
+        }
       }
 
       // Copy vertical bits during pre-render scanline

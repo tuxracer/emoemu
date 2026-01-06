@@ -115,12 +115,13 @@ export class Emulator {
         this.ppu.clearNMI();
         this.cpu.nmi();
       }
-    }
 
-    // Check for mapper IRQ (used by MMC3 scanline counter, etc.)
-    if (this.cartridge.irqPending()) {
-      this.cartridge.acknowledgeIrq();
-      this.cpu.irq();
+      // Check for mapper IRQ each PPU cycle (used by MMC3 scanline counter)
+      // This allows more accurate IRQ timing
+      if (this.cartridge.irqPending()) {
+        this.cpu.irq();
+        // Don't acknowledge here - let the game do it by writing to $E000
+      }
     }
 
     // Handle DMA if needed

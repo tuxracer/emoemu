@@ -110,4 +110,12 @@ export class Cartridge {
   acknowledgeIrq(): void {
     this.mapper.acknowledgeIrq?.();
   }
+
+  /**
+   * Notify the mapper of a scanline for IRQ counter (MMC3)
+   * Called once per scanline at a specific cycle
+   */
+  notifyScanline(scanline: number, renderingEnabled: boolean): void {
+    this.mapper.notifyScanline?.(scanline, renderingEnabled);
+  }
 }
