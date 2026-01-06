@@ -290,10 +290,13 @@ async function main(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
   try {
+    // Only pass explicit dimensions if user specified them (enables auto-resize otherwise)
+    const explicitDimensions = options.width !== undefined || options.height !== undefined;
+
     const emulator = new Emulator({
       romPath: options.romPath,
-      width: displaySize.width,
-      height: displaySize.height,
+      width: explicitDimensions ? displaySize.width : undefined,
+      height: explicitDimensions ? displaySize.height : undefined,
       useColor: options.useColor,
       renderMode: options.renderMode,
       scale: options.scale,

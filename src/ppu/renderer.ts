@@ -145,4 +145,15 @@ export class TerminalRenderer {
   moveCursorToRow(row: number): string {
     return `\x1b[${row};1H`;
   }
+
+  // Update display dimensions (for terminal resize handling)
+  setDimensions(width: number, height: number): void {
+    this.width = width;
+    this.height = height;
+  }
+
+  // Get current dimensions
+  getDimensions(): { width: number; height: number } {
+    return { width: this.width, height: this.height };
+  }
 }

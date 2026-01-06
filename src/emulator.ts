@@ -20,6 +20,7 @@ interface Renderer {
   showCursor(): string;
   getStatusRow(): number;
   moveCursorToRow(row: number): string;
+  setDimensions?(width: number, height: number): void;
 }
 
 export interface EmulatorOptions {
@@ -31,6 +32,47 @@ export interface EmulatorOptions {
   scale?: number;  // For Kitty renderer
   enableGamepad?: boolean;  // Enable gamepad/controller support
   enableAudio?: boolean;  // Enable audio output (default: true)
+}
+
+// Calculate optimal dimensions for terminal/ASCII rendering
+function calculateTerminalDimensions(asciiMode: boolean): { width: number; height: number } {
+  const termCols = process.stdout.columns || 80;
+  const termRows = process.stdout.rows || 24;
+
+  // Leave 2 rows for status line
+  const availableRows = termRows - 2;
+
+  // NES is 256x240 (8:7.5 aspect ratio, displayed on 4:3 TV)
+  // Terminal cells are roughly 1:2 (width:height)
+  // For terminal mode (half-blocks): each row = 2 NES pixels vertically
+  // For ASCII mode: each row = 1 NES pixel
+
+  if (asciiMode) {
+    // ASCII: 1 char = 1 pixel
+    // Maintain ~4:3 display aspect ratio accounting for cell aspect
+    // cols / (rows * 2) = 4/3 => cols = rows * 8/3
+    let height = availableRows;
+    let width = Math.floor(height * 8 / 3);
+
+    if (width > termCols) {
+      width = termCols;
+      height = Math.floor(width * 3 / 8);
+    }
+
+    return { width, height };
+  } else {
+    // Terminal half-block mode: 1 char = 1x2 NES pixels
+    // Each row represents 2 vertical pixels
+    let height = availableRows;
+    let width = Math.floor(height * 2 * 8 / 7.5); // Account for half-blocks
+
+    if (width > termCols) {
+      width = termCols;
+      height = Math.floor(width * 7.5 / 16);
+    }
+
+    return { width, height };
+  }
 }
 
 export class Emulator {
@@ -47,6 +89,7 @@ export class Emulator {
   private apu: APU;
   private speaker: Speaker | null = null;
   private audioEnabled: boolean = true;
+  private autoResize: boolean = false; // Whether to handle terminal resize events
 
   private running: boolean = false;
   private frameCount: number = 0;
@@ -88,16 +131,28 @@ export class Emulator {
         scale: options.scale,  // undefined = auto-fit to terminal
       });
     } else if (this.renderMode === 'ascii') {
+      // Auto-size to terminal if no explicit dimensions given
+      const explicitDims = options.width && options.height;
+      const dims = explicitDims
+        ? { width: options.width!, height: options.height! }
+        : calculateTerminalDimensions(true);
+      this.autoResize = !explicitDims;
       this.renderer = new TerminalRenderer({
-        width: options.width ?? 128,
-        height: options.height ?? 60,
+        width: dims.width,
+        height: dims.height,
         useColor: options.useColor ?? true,
         asciiMode: true,
       });
     } else {
+      // Auto-size to terminal if no explicit dimensions given
+      const explicitDims = options.width && options.height;
+      const dims = explicitDims
+        ? { width: options.width!, height: options.height! }
+        : calculateTerminalDimensions(false);
+      this.autoResize = !explicitDims;
       this.renderer = new TerminalRenderer({
-        width: options.width ?? 128,
-        height: options.height ?? 60,
+        width: dims.width,
+        height: dims.height,
         useColor: options.useColor ?? true,
       });
     }
@@ -196,6 +251,10 @@ export class Emulator {
       this.gamepadManager.start();
     }
 
+    // Track terminal size for resize detection (terminal/ascii modes)
+    let lastTermCols = process.stdout.columns || 0;
+    let lastTermRows = process.stdout.rows || 0;
+
     this.lastFrameTime = performance.now();
 
     const loop = (): void => {
@@ -213,6 +272,20 @@ export class Emulator {
       const elapsed = now - this.lastFrameTime;
 
       if (elapsed >= this.targetFrameTime) {
+        // Check for terminal resize (terminal/ascii modes)
+        if (this.autoResize) {
+          const currentCols = process.stdout.columns || 0;
+          const currentRows = process.stdout.rows || 0;
+          if (currentCols !== lastTermCols || currentRows !== lastTermRows) {
+            lastTermCols = currentCols;
+            lastTermRows = currentRows;
+            const isAscii = this.renderMode === 'ascii';
+            const dims = calculateTerminalDimensions(isAscii);
+            (this.renderer as TerminalRenderer).setDimensions(dims.width, dims.height);
+            process.stdout.write(this.renderer.clearScreen());
+          }
+        }
+
         // Update input state (no-op with true keyup, but kept for API)
         this.inputManager.update();
 
@@ -224,11 +297,9 @@ export class Emulator {
 
         // Calculate actual FPS and display on fixed status line
         const fps = 1000 / elapsed;
-        const buttons = this.inputManager.getPressedButtons();
-        const gamepadInfo = this.gamepadManager ? this.gamepadManager.getDebugInfo() : '';
         const statusRow = this.renderer.getStatusRow();
         process.stdout.write(this.renderer.moveCursorToRow(statusRow));
-        process.stdout.write(`FPS: ${fps.toFixed(1)} | Frame: ${this.frameCount} | Keys: ${buttons.padEnd(12)} | ${gamepadInfo.padEnd(30)}`);
+        process.stdout.write(`FPS: ${fps.toFixed(1)}`);
 
         this.lastFrameTime = now;
       }
