@@ -8,7 +8,7 @@ import { GamepadManager } from './input/gamepad-manager.js';
 import { TerminalRenderer } from './ppu/renderer.js';
 import { KittyRenderer } from './ppu/kitty-renderer.js';
 import { APU } from './apu/apu.js';
-import Speaker from 'speaker';
+import { AudioManager } from './apu/audio-manager.js';
 
 export type RenderMode = 'terminal' | 'kitty' | 'ascii';
 
@@ -45,7 +45,7 @@ export class Emulator {
   private renderer: Renderer;
   private renderMode: RenderMode;
   private apu: APU;
-  private speaker: Speaker | null = null;
+  private audioManager: AudioManager | null = null;
   private audioEnabled: boolean = true;
 
   private running: boolean = false;
@@ -177,9 +177,9 @@ export class Emulator {
     process.stdout.write(this.renderer.hideCursor());
     process.stdout.write(this.renderer.clearScreen());
 
-    // Setup audio output
+    // Setup audio output (async - worker thread initialization)
     if (this.audioEnabled) {
-      this.setupAudio();
+      await this.setupAudio();
     }
 
     // Setup stdin first (needed for Kitty detection)
@@ -244,32 +244,23 @@ export class Emulator {
     this.running = false;
   }
 
-  private setupAudio(): void {
-    // Create speaker for audio output
-    this.speaker = new Speaker({
-      channels: 1,
-      bitDepth: 16,
-      sampleRate: this.apu.getSampleRate(),
-    });
+  private async setupAudio(): Promise<void> {
+    // Create audio manager with worker thread
+    this.audioManager = new AudioManager(this.apu.getSampleRate());
 
-    // Handle speaker errors silently (e.g., no audio device)
-    this.speaker.on('error', () => {
+    // Start the audio worker
+    const success = await this.audioManager.start();
+    if (!success) {
       this.audioEnabled = false;
-      this.speaker = null;
-    });
+      this.audioManager = null;
+      return;
+    }
 
-    // Connect APU sample output to speaker
+    // Connect APU sample output to audio manager
+    // The manager handles conversion and playback on a worker thread
     this.apu.onSamplesReady = (samples: Float32Array) => {
-      if (this.speaker && this.audioEnabled) {
-        // Convert float samples to 16-bit PCM
-        const buffer = Buffer.alloc(samples.length * 2);
-        for (let i = 0; i < samples.length; i++) {
-          // Clamp and convert to 16-bit signed integer
-          const sample = Math.max(-1, Math.min(1, samples[i]));
-          const int16 = Math.floor(sample * 32767);
-          buffer.writeInt16LE(int16, i * 2);
-        }
-        this.speaker.write(buffer);
+      if (this.audioManager && this.audioEnabled) {
+        this.audioManager.writeSamples(samples);
       }
     };
   }
@@ -299,11 +290,11 @@ export class Emulator {
       this.gamepadManager.stop();
     }
 
-    // Stop audio
-    if (this.speaker) {
+    // Stop audio worker
+    if (this.audioManager) {
       this.apu.onSamplesReady = null;
-      this.speaker.end();
-      this.speaker = null;
+      this.audioManager.stop();
+      this.audioManager = null;
     }
 
     // Stop global keyboard listener
