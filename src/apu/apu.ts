@@ -457,6 +457,12 @@ class DMCChannel {
   }
 }
 
+// Precomputed pulse mixer lookup table (avoids division in hot path)
+const PULSE_TABLE = new Float32Array(31);
+for (let i = 0; i < 31; i++) {
+  PULSE_TABLE[i] = i === 0 ? 0 : 95.88 / (8128 / i + 100);
+}
+
 // Main APU class
 export class APU {
   private pulse1: PulseChannel = new PulseChannel(1);
@@ -469,16 +475,20 @@ export class APU {
   private frameCounterMode: number = 0; // 0 = 4-step, 1 = 5-step
   private frameIRQInhibit: boolean = false;
   private frameIRQPending: boolean = false;
-  private frameValue: number = 0;
 
-  // Timing
+  // Timing - use counters instead of modulo
   private cycleCount: number = 0;
+  private frameCycleCount: number = 0;
+  private frameStep: number = 0;
 
   // Audio output
   private sampleRate: number = 44100;
   private cpuFrequency: number = 1789773; // NTSC
   private sampleBuffer: Float32Array;
   private sampleIndex: number = 0;
+
+  // Use fixed-point arithmetic for sample timing
+  private sampleCounter: number = 0;
   private cyclesPerSample: number;
 
   // Memory read callback for DMC
@@ -488,8 +498,9 @@ export class APU {
   onSamplesReady: ((samples: Float32Array) => void) | null = null;
 
   constructor() {
-    this.cyclesPerSample = this.cpuFrequency / this.sampleRate;
-    this.sampleBuffer = new Float32Array(2048);
+    this.cyclesPerSample = Math.floor(this.cpuFrequency / this.sampleRate);
+    // Smaller buffer = more frequent flushes = less latency
+    this.sampleBuffer = new Float32Array(512);
     this.reset();
   }
 
@@ -507,8 +518,10 @@ export class APU {
     this.frameCounterMode = 0;
     this.frameIRQInhibit = false;
     this.frameIRQPending = false;
-    this.frameValue = 0;
     this.cycleCount = 0;
+    this.frameCycleCount = 0;
+    this.frameStep = 0;
+    this.sampleCounter = 0;
     this.sampleIndex = 0;
   }
 
@@ -622,61 +635,47 @@ export class APU {
 
   // Clock APU (called every CPU cycle)
   clock(): void {
+    const isEvenCycle = (this.cycleCount & 1) === 0;
+
     // Clock timers (triangle clocks every cycle, others every other cycle)
     this.triangle.clockTimer();
 
-    if (this.cycleCount % 2 === 0) {
+    if (isEvenCycle) {
       this.pulse1.clockTimer();
       this.pulse2.clockTimer();
       this.noise.clockTimer();
       this.dmc.clockTimer();
     }
 
-    // Frame counter (clocks at ~240Hz in 4-step mode, ~192Hz in 5-step)
-    // Frame counter steps happen at specific CPU cycles
-    const frameStep = Math.floor(this.cycleCount / 7457);
-    if (frameStep !== this.frameValue) {
-      this.frameValue = frameStep;
-
-      if (this.frameCounterMode === 0) {
-        // 4-step mode
-        switch (frameStep % 4) {
-          case 0:
-          case 2:
-            this.clockQuarterFrame();
-            break;
-          case 1:
-            this.clockQuarterFrame();
-            this.clockHalfFrame();
-            break;
-          case 3:
-            this.clockQuarterFrame();
-            this.clockHalfFrame();
-            if (!this.frameIRQInhibit) {
-              this.frameIRQPending = true;
-            }
-            break;
-        }
-      } else {
-        // 5-step mode
-        switch (frameStep % 5) {
-          case 0:
-          case 2:
-            this.clockQuarterFrame();
-            break;
-          case 1:
-          case 4:
-            this.clockQuarterFrame();
-            this.clockHalfFrame();
-            break;
-        }
-      }
+    // Frame counter - use counter instead of modulo
+    this.frameCycleCount++;
+    if (this.frameCycleCount >= 7457) {
+      this.frameCycleCount = 0;
+      this.stepFrameCounter();
     }
 
-    // Generate sample
-    if (this.cycleCount % Math.floor(this.cyclesPerSample) === 0) {
-      const sample = this.mix();
-      this.sampleBuffer[this.sampleIndex++] = sample;
+    // Sample generation - use counter instead of modulo
+    this.sampleCounter++;
+    if (this.sampleCounter >= this.cyclesPerSample) {
+      this.sampleCounter = 0;
+
+      // Inline mixer for performance
+      const p1 = this.pulse1.output();
+      const p2 = this.pulse2.output();
+      const pulseOut = PULSE_TABLE[p1 + p2];
+
+      const t = this.triangle.output();
+      const n = this.noise.output();
+      const d = this.dmc.output();
+
+      // TND mixer - fast path for silence
+      let tndOut = 0;
+      if (t | n | d) {
+        const tndSum = t / 8227 + n / 12241 + d / 22638;
+        tndOut = 159.79 / (1 / tndSum + 100);
+      }
+
+      this.sampleBuffer[this.sampleIndex++] = pulseOut + tndOut;
 
       if (this.sampleIndex >= this.sampleBuffer.length) {
         if (this.onSamplesReady) {
@@ -687,6 +686,47 @@ export class APU {
     }
 
     this.cycleCount++;
+  }
+
+  private stepFrameCounter(): void {
+    if (this.frameCounterMode === 0) {
+      // 4-step mode
+      switch (this.frameStep) {
+        case 0:
+        case 2:
+          this.clockQuarterFrame();
+          break;
+        case 1:
+          this.clockQuarterFrame();
+          this.clockHalfFrame();
+          break;
+        case 3:
+          this.clockQuarterFrame();
+          this.clockHalfFrame();
+          if (!this.frameIRQInhibit) {
+            this.frameIRQPending = true;
+          }
+          this.frameStep = -1; // Will wrap to 0
+          break;
+      }
+    } else {
+      // 5-step mode
+      switch (this.frameStep) {
+        case 0:
+        case 2:
+          this.clockQuarterFrame();
+          break;
+        case 1:
+        case 3:
+          this.clockQuarterFrame();
+          this.clockHalfFrame();
+          break;
+        case 4:
+          this.frameStep = -1; // Will wrap to 0
+          break;
+      }
+    }
+    this.frameStep++;
   }
 
   private clockQuarterFrame(): void {
@@ -703,27 +743,6 @@ export class APU {
     this.pulse2.clockSweep();
     this.triangle.clockLength();
     this.noise.clockLength();
-  }
-
-  private mix(): number {
-    const p1 = this.pulse1.output();
-    const p2 = this.pulse2.output();
-    const t = this.triangle.output();
-    const n = this.noise.output();
-    const d = this.dmc.output();
-
-    // NES APU mixer formula (from NESDev wiki)
-    let pulseOut = 0;
-    if (p1 + p2 > 0) {
-      pulseOut = 95.88 / (8128 / (p1 + p2) + 100);
-    }
-
-    let tndOut = 0;
-    if (t + n + d > 0) {
-      tndOut = 159.79 / (1 / (t / 8227 + n / 12241 + d / 22638) + 100);
-    }
-
-    return pulseOut + tndOut;
   }
 
   irqPending(): boolean {
