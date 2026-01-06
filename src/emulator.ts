@@ -4,6 +4,7 @@ import { Bus } from './memory/bus.js';
 import { Cartridge } from './cartridge/cartridge.js';
 import { Controller } from './input/controller.js';
 import { InputManager } from './input/input-manager.js';
+import { GamepadManager } from './input/gamepad-manager.js';
 import { TerminalRenderer } from './ppu/renderer.js';
 import { KittyRenderer } from './ppu/kitty-renderer.js';
 
@@ -26,6 +27,7 @@ export interface EmulatorOptions {
   useColor?: boolean;
   renderMode?: RenderMode;
   scale?: number;  // For Kitty renderer
+  enableGamepad?: boolean;  // Enable gamepad/controller support
 }
 
 export class Emulator {
@@ -36,6 +38,7 @@ export class Emulator {
   private controller1: Controller;
   private controller2: Controller;
   private inputManager: InputManager;
+  private gamepadManager: GamepadManager | null = null;
   private renderer: Renderer;
   private renderMode: RenderMode;
 
@@ -62,6 +65,11 @@ export class Emulator {
 
     // Initialize input manager with controllers
     this.inputManager = new InputManager(this.controller1, this.controller2);
+
+    // Initialize gamepad manager if enabled (default: enabled)
+    if (options.enableGamepad !== false) {
+      this.gamepadManager = new GamepadManager(this.controller1, this.controller2);
+    }
 
     // Initialize renderer based on mode
     this.renderMode = options.renderMode ?? 'kitty';
@@ -146,6 +154,11 @@ export class Emulator {
     this.inputManager.start();
     this.setupInput();
 
+    // Start gamepad manager if available
+    if (this.gamepadManager) {
+      this.gamepadManager.start();
+    }
+
     this.lastFrameTime = performance.now();
 
     const loop = (): void => {
@@ -175,9 +188,10 @@ export class Emulator {
         // Calculate actual FPS and display on fixed status line
         const fps = 1000 / elapsed;
         const buttons = this.inputManager.getPressedButtons();
+        const gamepadInfo = this.gamepadManager ? this.gamepadManager.getDebugInfo() : '';
         const statusRow = this.renderer.getStatusRow();
         process.stdout.write(this.renderer.moveCursorToRow(statusRow));
-        process.stdout.write(`FPS: ${fps.toFixed(1)} | Frame: ${this.frameCount} | Keys: ${buttons.padEnd(20)}`);
+        process.stdout.write(`FPS: ${fps.toFixed(1)} | Frame: ${this.frameCount} | Keys: ${buttons.padEnd(12)} | ${gamepadInfo.padEnd(30)}`);
 
         this.lastFrameTime = now;
       }
@@ -211,6 +225,11 @@ export class Emulator {
   }
 
   private cleanup(): void {
+    // Stop gamepad manager
+    if (this.gamepadManager) {
+      this.gamepadManager.stop();
+    }
+
     // Stop global keyboard listener
     this.inputManager.stop();
 

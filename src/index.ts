@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { Emulator, RenderMode } from './emulator.js';
+import { GamepadManager } from './input/gamepad-manager.js';
+import HID from 'node-hid';
 
 function printUsage(): void {
   console.log(`
@@ -9,14 +11,17 @@ TUI-NES - Terminal NES Emulator
 Usage: tui-nes <rom.nes> [options]
 
 Options:
-  --kitty         Use Kitty graphics protocol (default, best quality)
-  --terminal      Use terminal character rendering (Unicode half-blocks)
-  --ascii         Use colored ASCII character rendering
-  --no-color      Disable colors (use with --ascii or --terminal)
-  --scale <n>     Scale factor for Kitty mode (default: auto-fit to terminal)
-  --width <n>     Set display width in characters (terminal/ascii mode)
-  --height <n>    Set display height in characters (terminal/ascii mode)
-  --help          Show this help message
+  --kitty           Use Kitty graphics protocol (default, best quality)
+  --terminal        Use terminal character rendering (Unicode half-blocks)
+  --ascii           Use colored ASCII character rendering
+  --no-color        Disable colors (use with --ascii or --terminal)
+  --scale <n>       Scale factor for Kitty mode (default: auto-fit to terminal)
+  --width <n>       Set display width in characters (terminal/ascii mode)
+  --height <n>      Set display height in characters (terminal/ascii mode)
+  --list-gamepads   List detected gamepad/controller devices and exit
+  --no-gamepad      Disable gamepad support
+  --debug-gamepad   Show raw gamepad HID data (for debugging)
+  --help            Show this help message
 
 Controls:
   W/Arrow Up      D-Pad Up
@@ -42,6 +47,9 @@ function parseArgs(args: string[]): {
   renderMode: RenderMode;
   scale: number | undefined;
   help: boolean;
+  listGamepads: boolean;
+  enableGamepad: boolean;
+  debugGamepad: boolean;
 } {
   const result = {
     romPath: undefined as string | undefined,
@@ -51,6 +59,9 @@ function parseArgs(args: string[]): {
     renderMode: 'kitty' as RenderMode,
     scale: undefined as number | undefined,  // undefined = auto-fit to terminal
     help: false,
+    listGamepads: false,
+    enableGamepad: true,
+    debugGamepad: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -72,6 +83,12 @@ function parseArgs(args: string[]): {
       result.renderMode = 'kitty';
     } else if (arg === '--terminal') {
       result.renderMode = 'terminal';
+    } else if (arg === '--list-gamepads') {
+      result.listGamepads = true;
+    } else if (arg === '--no-gamepad') {
+      result.enableGamepad = false;
+    } else if (arg === '--debug-gamepad') {
+      result.debugGamepad = true;
     } else if (!arg.startsWith('-')) {
       result.romPath = arg;
     }
@@ -135,9 +152,105 @@ function calculateDisplaySize(requestedWidth?: number, requestedHeight?: number)
   return { width, height };
 }
 
+function debugGamepad(): void {
+  console.log('Gamepad Debug Mode');
+  console.log('==================');
+  console.log('Press Ctrl+C to exit\n');
+
+  const devices = GamepadManager.listDevices();
+  if (devices.length === 0) {
+    console.log('No gamepad devices found.');
+    process.exit(1);
+  }
+
+  const deviceInfo = devices[0];
+  console.log(`Connecting to: ${deviceInfo.product}`);
+  console.log(`Path: ${deviceInfo.path}\n`);
+
+  try {
+    const device = new HID.HID(deviceInfo.path);
+    let lastData = '';
+
+    device.on('data', (data: Buffer) => {
+      // Only print if data changed (reduces noise)
+      const hexStr = Array.from(data)
+        .map((b, i) => `${i.toString().padStart(2)}:${b.toString(16).padStart(2, '0')}`)
+        .join(' ');
+
+      if (hexStr !== lastData) {
+        // Show byte index and value in both hex and decimal
+        console.log(`\nBytes (${data.length}):`);
+        const parts: string[] = [];
+        for (let i = 0; i < data.length; i++) {
+          parts.push(`[${i}]=0x${data[i].toString(16).padStart(2, '0')}(${data[i].toString().padStart(3)})`);
+        }
+        console.log(parts.join(' '));
+        lastData = hexStr;
+      }
+    });
+
+    device.on('error', (err) => {
+      console.error('Device error:', err);
+      process.exit(1);
+    });
+
+    // Keep running
+    process.on('SIGINT', () => {
+      device.close();
+      process.exit(0);
+    });
+  } catch (err) {
+    console.error('Failed to open device:', err);
+    process.exit(1);
+  }
+}
+
+function listGamepads(): void {
+  console.log('Detected Gamepad Devices');
+  console.log('========================\n');
+
+  const devices = GamepadManager.listDevices();
+
+  if (devices.length === 0) {
+    console.log('No gamepad devices detected.\n');
+    console.log('Tips:');
+    console.log('  - Make sure your controller is connected and paired (for Bluetooth)');
+    console.log('  - Try pressing a button on the controller to wake it up');
+    console.log('  - On Linux, you may need to add your user to the "input" group\n');
+  } else {
+    for (const device of devices) {
+      console.log(`${device.product}`);
+      console.log(`  Manufacturer: ${device.manufacturer}`);
+      console.log(`  Vendor ID:    0x${device.vendorId.toString(16).padStart(4, '0')}`);
+      console.log(`  Product ID:   0x${device.productId.toString(16).padStart(4, '0')}`);
+      console.log(`  Profile:      ${device.profile}`);
+      console.log('');
+    }
+  }
+
+  console.log('Supported Controllers:');
+  for (const profile of GamepadManager.getSupportedProfiles()) {
+    console.log(`  - ${profile}`);
+  }
+  console.log('  - Generic USB Gamepad (fallback)');
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const options = parseArgs(args);
+
+  // Handle --list-gamepads before checking for ROM
+  if (options.listGamepads) {
+    listGamepads();
+    process.exit(0);
+  }
+
+  // Handle --debug-gamepad before checking for ROM
+  if (options.debugGamepad) {
+    debugGamepad();
+    // debugGamepad() doesn't return - runs until Ctrl+C
+    return;
+  }
 
   if (options.help || !options.romPath) {
     printUsage();
@@ -179,6 +292,7 @@ async function main(): Promise<void> {
       useColor: options.useColor,
       renderMode: options.renderMode,
       scale: options.scale,
+      enableGamepad: options.enableGamepad,
     });
 
     await emulator.run();
