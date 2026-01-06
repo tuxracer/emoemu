@@ -68,7 +68,7 @@ export class Emulator {
 
     if (this.renderMode === 'kitty') {
       this.renderer = new KittyRenderer({
-        scale: options.scale ?? 2,
+        scale: options.scale,  // undefined = auto-fit to terminal
       });
     } else if (this.renderMode === 'ascii') {
       this.renderer = new TerminalRenderer({

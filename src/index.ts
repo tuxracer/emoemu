@@ -13,7 +13,7 @@ Options:
   --terminal      Use terminal character rendering (Unicode half-blocks)
   --ascii         Use colored ASCII character rendering
   --no-color      Disable colors (use with --ascii or --terminal)
-  --scale <n>     Scale factor for Kitty mode (default: 2)
+  --scale <n>     Scale factor for Kitty mode (default: auto-fit to terminal)
   --width <n>     Set display width in characters (terminal/ascii mode)
   --height <n>    Set display height in characters (terminal/ascii mode)
   --help          Show this help message
@@ -40,7 +40,7 @@ function parseArgs(args: string[]): {
   height: number | undefined;
   useColor: boolean;
   renderMode: RenderMode;
-  scale: number;
+  scale: number | undefined;
   help: boolean;
 } {
   const result = {
@@ -49,7 +49,7 @@ function parseArgs(args: string[]): {
     height: undefined as number | undefined, // undefined = auto-fit
     useColor: true,
     renderMode: 'kitty' as RenderMode,
-    scale: 2,
+    scale: undefined as number | undefined,  // undefined = auto-fit to terminal
     help: false,
   };
 
@@ -153,7 +153,11 @@ async function main(): Promise<void> {
   console.log(`Terminal: ${process.stdout.columns || '?'}x${process.stdout.rows || '?'}`);
   console.log(`Render mode: ${options.renderMode}`);
   if (options.renderMode === 'kitty') {
-    console.log(`Scale: ${options.scale}x (${256 * options.scale}x${240 * options.scale} pixels)`);
+    if (options.scale !== undefined) {
+      console.log(`Scale: ${options.scale}x (${256 * options.scale}x${240 * options.scale} pixels)`);
+    } else {
+      console.log('Scale: auto-fit to terminal');
+    }
   } else if (options.renderMode === 'ascii') {
     console.log(`Display: ${displaySize.width}x${displaySize.height}${options.width === undefined ? ' (auto-fit)' : ''}`);
     console.log(`Mode: ASCII characters${options.useColor ? ' with color' : ' (grayscale)'}`);
