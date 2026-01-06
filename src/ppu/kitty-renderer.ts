@@ -95,26 +95,17 @@ export class KittyRenderer {
     return this.autoScale;
   }
 
-  // Convert NES frame buffer to RGB data
+  // Convert NES frame buffer to RGB data (native resolution - Kitty handles scaling)
   private frameToRgb(frameBuffer: Uint8Array): Uint8Array {
-    const width = 256;
-    const height = 240;
-    const scaledWidth = width * this.scale;
-    const scaledHeight = height * this.scale;
-    const rgb = new Uint8Array(scaledWidth * scaledHeight * 3);
+    const rgb = new Uint8Array(NES_WIDTH * NES_HEIGHT * 3);
 
-    for (let y = 0; y < scaledHeight; y++) {
-      const srcY = Math.floor(y / this.scale);
-      for (let x = 0; x < scaledWidth; x++) {
-        const srcX = Math.floor(x / this.scale);
-        const nesColor = frameBuffer[srcY * width + srcX] & 0x3f;
-        const [r, g, b] = nesPalette[nesColor];
-
-        const dstIdx = (y * scaledWidth + x) * 3;
-        rgb[dstIdx] = r;
-        rgb[dstIdx + 1] = g;
-        rgb[dstIdx + 2] = b;
-      }
+    for (let i = 0; i < NES_WIDTH * NES_HEIGHT; i++) {
+      const nesColor = frameBuffer[i] & 0x3f;
+      const [r, g, b] = nesPalette[nesColor];
+      const dstIdx = i * 3;
+      rgb[dstIdx] = r;
+      rgb[dstIdx + 1] = g;
+      rgb[dstIdx + 2] = b;
     }
 
     return rgb;
@@ -158,6 +149,16 @@ export class KittyRenderer {
         let displayParams = '';
         if (this.autoScale && this.displayCols > 0 && this.displayRows > 0) {
           displayParams = `,c=${this.displayCols},r=${this.displayRows}`;
+        } else if (!this.autoScale && this.scale > 1) {
+          // When scale is specified, tell Kitty to scale the display size
+          // Use pixel dimensions for explicit scaling
+          const displayWidth = NES_WIDTH * this.scale;
+          const displayHeight = NES_HEIGHT * this.scale;
+          // Use z (z-index) along with explicit rows/cols calculated from pixels
+          // Estimate ~10 pixels per column, ~20 pixels per row (typical terminal cell size)
+          const cols = Math.ceil(displayWidth / 10);
+          const rows = Math.ceil(displayHeight / 20);
+          displayParams = `,c=${cols},r=${rows}`;
         }
         control = `a=T,f=24,s=${width},v=${height},i=${currentId},p=1,q=2,C=1${displayParams},m=${isLast ? 0 : 1}`;
       } else {
@@ -180,10 +181,7 @@ export class KittyRenderer {
 
   // Render frame buffer to Kitty graphics
   render(frameBuffer: Uint8Array): string {
-    const width = 256 * this.scale;
-    const height = 240 * this.scale;
-
-    // Convert frame to RGB
+    // Convert frame to RGB at native resolution - Kitty handles scaling
     const rgb = this.frameToRgb(frameBuffer);
 
     // Build output
@@ -192,8 +190,8 @@ export class KittyRenderer {
     // Move cursor to top-left for image placement
     output += `${ESC}[1;1H`;
 
-    // Send new image
-    output += this.sendImage(rgb, width, height);
+    // Send native resolution image - Kitty will scale it
+    output += this.sendImage(rgb, NES_WIDTH, NES_HEIGHT);
 
     return output;
   }
