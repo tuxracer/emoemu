@@ -117,6 +117,12 @@ export class Emulator {
       }
     }
 
+    // Check for mapper IRQ (used by MMC3 scanline counter, etc.)
+    if (this.cartridge.irqPending()) {
+      this.cartridge.acknowledgeIrq();
+      this.cpu.irq();
+    }
+
     // Handle DMA if needed
     const dma = this.bus.doDma();
     if (dma.active && dma.data) {

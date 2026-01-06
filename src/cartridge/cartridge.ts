@@ -96,4 +96,18 @@ export class Cartridge {
   ppuWrite(address: number, data: number): void {
     this.mapper.ppuWrite(address, data);
   }
+
+  /**
+   * Check if the mapper has a pending IRQ (used by MMC3, etc.)
+   */
+  irqPending(): boolean {
+    return this.mapper.irqPending?.() ?? false;
+  }
+
+  /**
+   * Acknowledge and clear the mapper IRQ
+   */
+  acknowledgeIrq(): void {
+    this.mapper.acknowledgeIrq?.();
+  }
 }
