@@ -1,269 +1,202 @@
-# TUI NES Emulator - Technical Requirements Document
+# TUI NES Emulator
 
-## Project Overview
+A terminal-based NES emulator written in TypeScript that renders graphics using the Kitty graphics protocol, Unicode half-blocks, or ASCII characters.
 
-A terminal-based Nintendo Entertainment System (NES) emulator written in TypeScript. The emulator renders graphics using Unicode/ASCII characters in the terminal and accepts keyboard input for controls.
+## Quick Reference
 
-**Platform Compatibility:** This application should be compatible when running in the terminal on macOS, Windows, and Linux.
-
-## Technical Stack
-
-- **Language:** TypeScript
-- **Runtime:** Node.js
-- **Terminal UI:** Ink (React for CLIs) or blessed/blessed-contrib
-- **Build Tool:** tsup or esbuild
-
-## Core Architecture
-
-### 1. CPU (Ricoh 2A03 - based on MOS 6502)
-
-The NES CPU is a modified 6502 processor running at 1.79 MHz (NTSC).
-
-**Requirements:**
-- Implement all official 6502 opcodes (151 instructions)
-- Support all addressing modes (13 modes)
-- Accurate cycle counting for timing
-- Interrupt handling (NMI, IRQ, Reset)
-- Register emulation (A, X, Y, SP, PC, Status)
-
-**Registers:**
-- `A` - Accumulator (8-bit)
-- `X` - Index Register X (8-bit)
-- `Y` - Index Register Y (8-bit)
-- `SP` - Stack Pointer (8-bit)
-- `PC` - Program Counter (16-bit)
-- `P` - Status Register (8-bit flags: N, V, -, B, D, I, Z, C)
-
-### 2. PPU (Picture Processing Unit - Ricoh 2C02)
-
-The NES PPU generates the video signal at 256x240 pixels.
-
-**Requirements:**
-- VRAM management (2KB internal + cartridge CHR-ROM/RAM)
-- Nametable mirroring (horizontal, vertical, single-screen, four-screen)
-- Pattern table rendering (8x8 pixel tiles)
-- Sprite rendering (64 sprites, 8 per scanline limit)
-- Background rendering with scrolling
-- Palette management (64 colors, 8 palettes)
-- OAM (Object Attribute Memory) for sprites
-- PPU registers ($2000-$2007, $4014)
-- Accurate scanline/cycle timing
-
-**Terminal Rendering:**
-- Convert 256x240 output to terminal characters
-- Use Unicode block characters (▀▄█░▒▓) for pseudo-pixels
-- Support half-block characters for 2:1 vertical resolution
-- Target ~128x60 effective character resolution (adjustable)
-- Color support via ANSI 256-color or true color (24-bit)
-
-### 3. APU (Audio Processing Unit)
-
-**Requirements (Optional/Phase 2):**
-- 2 Pulse wave channels
-- 1 Triangle wave channel
-- 1 Noise channel
-- 1 DMC (Delta Modulation Channel)
-- Frame counter for timing
-
-**Note:** Terminal audio is limited. Consider:
-- Outputting to system audio via node libraries (speaker, node-speaker)
-- Optional audio disable flag for pure TUI experience
-
-### 4. Memory Map
-
+```bash
+npm run build         # Build the project
+npm start -- <rom>    # Run a ROM
+npm run typecheck     # Type check without building
+npm test              # Run tests
 ```
-$0000-$07FF  2KB Internal RAM
-$0800-$1FFF  Mirrors of RAM
-$2000-$2007  PPU Registers
-$2008-$3FFF  Mirrors of PPU Registers
-$4000-$4017  APU and I/O Registers
-$4018-$401F  APU and I/O (normally disabled)
-$4020-$FFFF  Cartridge space (PRG-ROM, PRG-RAM, mappers)
-```
-
-### 5. Cartridge/Mapper Support
-
-**Phase 1 Mappers:**
-- Mapper 0 (NROM) - No mapper, direct ROM access
-- Mapper 1 (MMC1) - Common mapper with bank switching
-- Mapper 2 (UxROM) - Simple PRG bank switching
-
-**Phase 2 Mappers:**
-- Mapper 3 (CNROM) - CHR bank switching
-- Mapper 4 (MMC3) - Scanline counter, common mapper
-- Mapper 7 (AxROM) - Single-screen mirroring
-
-**iNES File Format:**
-- Parse 16-byte header
-- Extract PRG-ROM and CHR-ROM banks
-- Detect mapper number and mirroring mode
-
-### 6. Input System
-
-**Controller Mapping (Keyboard):**
-```
-NES Button    Default Key
-─────────────────────────
-D-Pad Up      W / Arrow Up
-D-Pad Down    S / Arrow Down
-D-Pad Left    A / Arrow Left
-D-Pad Right   D / Arrow Right
-A Button      K / Z
-B Button      J / X
-Start         Enter
-Select        Shift
-```
-
-**Requirements:**
-- Read keyboard input without blocking
-- Support key remapping via config
-- Handle simultaneous key presses
-- Emulate controller shift register ($4016, $4017)
-
-**NES Controller Behavior:**
-The NES supports multiple buttons being pressed simultaneously and buttons being held down continuously (not as rapid presses). The controller uses a shift register (the 4021 chip) that captures the current state of all eight buttons each frame when the console polls input. When a button is held, the NES reads it as pressed (returning a 1) on every frame until released. The emulator must accurately model this behavior to ensure games that require holding buttons (running, charging attacks, etc.) work correctly.
 
 ## Project Structure
 
 ```
-tui-nes/
-├── src/
-│   ├── index.ts           # Entry point
-│   ├── emulator.ts        # Main emulator orchestration
-│   ├── cpu/
-│   │   ├── cpu.ts         # 6502 CPU implementation
-│   │   ├── opcodes.ts     # Opcode definitions and handlers
-│   │   └── addressing.ts  # Addressing mode implementations
-│   ├── ppu/
-│   │   ├── ppu.ts         # PPU implementation
-│   │   ├── renderer.ts    # Terminal rendering logic
-│   │   └── palette.ts     # NES color palette definitions
-│   ├── apu/
-│   │   └── apu.ts         # Audio processing (optional)
-│   ├── memory/
-│   │   ├── bus.ts         # Memory bus / address decoding
-│   │   └── ram.ts         # RAM implementation
-│   ├── cartridge/
-│   │   ├── cartridge.ts   # ROM loading and parsing
-│   │   └── mappers/       # Mapper implementations
-│   │       ├── mapper.ts  # Base mapper interface
-│   │       ├── mapper0.ts # NROM
-│   │       ├── mapper1.ts # MMC1
-│   │       └── mapper2.ts # UxROM
-│   ├── input/
-│   │   └── controller.ts  # Input handling
-│   └── ui/
-│       ├── terminal.ts    # Terminal setup and management
-│       └── display.ts     # Frame buffer to terminal conversion
-├── tests/
-│   ├── cpu.test.ts        # CPU instruction tests
-│   └── ppu.test.ts        # PPU tests
-├── roms/                  # Test ROMs (not committed)
-├── package.json
-├── tsconfig.json
-└── CLAUDE.md
+src/
+├── index.ts              # CLI entry point, argument parsing
+├── emulator.ts           # Main emulation loop, component orchestration
+├── cpu/
+│   ├── cpu.ts            # 6502 CPU with registers, interrupts (NMI/IRQ)
+│   ├── opcodes.ts        # All 151 official opcodes with handlers
+│   └── addressing.ts     # 13 addressing modes
+├── ppu/
+│   ├── ppu.ts            # PPU with background/sprite rendering, scrolling
+│   ├── renderer.ts       # Terminal renderer (Unicode half-blocks + ASCII)
+│   ├── kitty-renderer.ts # Kitty graphics protocol renderer
+│   └── palette.ts        # NES 64-color palette → RGB mapping
+├── memory/
+│   └── bus.ts            # Memory bus, address decoding, DMA
+├── cartridge/
+│   ├── cartridge.ts      # iNES ROM parsing, mapper instantiation
+│   └── mappers/
+│       └── mapper.ts     # All mappers: 0 (NROM), 1 (MMC1), 2 (UxROM), 4 (MMC3)
+├── input/
+│   ├── controller.ts     # NES controller shift register emulation
+│   ├── input-manager.ts  # Keyboard input with Kitty protocol detection
+│   ├── gamepad-manager.ts # HID gamepad support via node-hid
+│   └── gamepad-profiles.ts # Controller profiles (Xbox, PlayStation, etc.)
+└── apu/
+    └── apu.ts            # Stub (audio not implemented)
 ```
 
-## Dependencies
+## Architecture
 
-```json
-{
-  "dependencies": {
-    "ink": "^4.0.0",
-    "react": "^18.0.0",
-    "chalk": "^5.0.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.0.0",
-    "tsup": "^8.0.0",
-    "@types/node": "^20.0.0",
-    "vitest": "^1.0.0"
-  }
+### Emulation Loop (`emulator.ts:runFrame`)
+
+```
+Per frame (until PPU sets frameComplete):
+  1. CPU executes one instruction → returns cycle count
+  2. PPU clocks 3x per CPU cycle
+  3. Check PPU NMI (vblank interrupt)
+  4. Check mapper IRQ (MMC3 scanline counter)
+  5. Handle OAM DMA if triggered
+```
+
+### CPU (`cpu/cpu.ts`)
+
+- Registers: A, X, Y, SP (8-bit), PC (16-bit), Status flags (N,V,B,D,I,Z,C)
+- Interrupts: `reset()`, `nmi()`, `irq()` - each reads vector from $FFFA-$FFFF
+- Instruction execution: `step()` returns cycle count for PPU synchronization
+
+### PPU (`ppu/ppu.ts`)
+
+- 256x240 framebuffer (palette indices 0-63)
+- Registers: $2000-$2007 (PPUCTRL, PPUMASK, PPUSTATUS, etc.)
+- Internal registers: v, t (VRAM address), x (fine scroll), w (write toggle)
+- Background: nametables, pattern tables, attribute tables
+- Sprites: 64 in OAM, 8 per scanline limit, sprite 0 hit detection
+- Timing: 341 cycles/scanline, 262 scanlines/frame (NTSC)
+
+### Mappers (`cartridge/mappers/mapper.ts`)
+
+All mappers in single file. Interface:
+```typescript
+interface Mapper {
+  cpuRead(address: number): number;
+  cpuWrite(address: number, data: number): void;
+  ppuRead(address: number): number;
+  ppuWrite(address: number, data: number): void;
+  mirrorMode?: number;      // 0=horizontal, 1=vertical, 2/3=single-screen
+  irqPending?(): boolean;   // For MMC3
+  acknowledgeIrq?(): void;
 }
 ```
 
-**Alternative terminal libraries:**
-- `blessed` - Full terminal widget library
-- `terminal-kit` - Advanced terminal manipulation
-- `ansi-escapes` - Raw ANSI escape sequences
+**Implemented:**
+- Mapper 0 (NROM): Direct ROM access, handles 16KB/32KB PRG
+- Mapper 1 (MMC1): Shift register banking, 16KB/32KB PRG modes, 4KB/8KB CHR
+- Mapper 2 (UxROM): Simple 16KB PRG bank switching
+- Mapper 4 (MMC3): 8KB PRG banks, 1KB CHR banks, scanline IRQ via A12 monitoring
 
-## Implementation Phases
+**Not implemented:** Mapper 3 (CNROM), 7 (AxROM), 9 (MMC2)
 
-### Phase 1: Foundation
-1. Set up TypeScript project with build tooling
-2. Implement iNES ROM parser
-3. Implement 6502 CPU with all opcodes
-4. Create memory bus with basic address decoding
-5. Run CPU tests (nestest.nes)
+### Input System
 
-### Phase 2: Graphics
-1. Implement PPU registers and state
-2. Implement background rendering
-3. Implement sprite rendering
-4. Create terminal renderer with Unicode blocks
-5. Implement NMI timing (vblank)
+**Keyboard** (`input/input-manager.ts`):
+- Auto-detects Kitty keyboard protocol for true keyup/keydown events
+- Falls back to legacy mode with 80ms auto-release timing
+- WASD/Arrows for D-pad, K/Z=A, J/X=B, Enter=Start, Space=Select
 
-### Phase 3: Playable
-1. Implement controller input
-2. Connect CPU/PPU timing (3 PPU cycles per CPU cycle)
-3. Implement Mapper 0 (NROM)
-4. Test with simple games (Donkey Kong, etc.)
+**Gamepad** (`input/gamepad-manager.ts`):
+- Uses node-hid for raw HID access (no SDL dependency)
+- Profiles for Xbox, PlayStation, Nintendo, 8BitDo controllers
+- Auto-detection with 3-second polling for hotplug
 
-### Phase 4: Compatibility
-1. Implement additional mappers (MMC1, UxROM)
-2. Fix timing edge cases
-3. Implement sprite 0 hit
-4. Optimize rendering performance
+### Renderers
 
-### Phase 5: Polish
-1. Add configuration file support
-2. Implement save states
-3. Add audio support (optional)
-4. Performance profiling and optimization
+**Kitty** (`ppu/kitty-renderer.ts`):
+- Best quality, sends raw RGB via Kitty graphics protocol
+- Auto-scales to fit terminal, diff-based updates
 
-## Technical Challenges
+**Terminal** (`ppu/renderer.ts`):
+- Unicode half-blocks (▀) - each character = 1x2 NES pixels
+- Uses 24-bit ANSI color codes
 
-### Terminal Rendering Performance
-- Target 60 FPS (16.67ms per frame)
-- Minimize terminal writes (diff-based updates)
-- Use double buffering
-- Consider reducing effective resolution
+**ASCII** (`ppu/renderer.ts` with `asciiMode`):
+- Brightness-mapped characters: ` .:-=+*#%@`
+- Optional color support
 
-### Color Accuracy
-- NES has 64 unique colors
-- Map to nearest ANSI 256 or true color
-- Provide palette customization
+## Memory Map
 
-### Timing Accuracy
-- NES runs at ~60 FPS (NTSC)
-- CPU/PPU synchronization is critical
-- Use requestAnimationFrame-style timing in Node.js
-
-## Testing Strategy
-
-1. **CPU Tests:** Use nestest.nes ROM for comprehensive CPU testing
-2. **PPU Tests:** Visual comparison with known-good emulators
-3. **Integration Tests:** Test complete frame generation
-4. **Performance Tests:** Measure FPS and timing accuracy
-
-## Commands
-
-```bash
-# Development
-npm run dev           # Run in development mode
-npm run build         # Build for production
-npm run test          # Run test suite
-
-# Usage
-npm start -- <rom.nes>           # Run a ROM
-npm start -- --help              # Show help
-npm start -- --scale <n>         # Set display scale
-npm start -- --no-color          # Disable colors
+```
+$0000-$07FF  2KB RAM (mirrored to $1FFF)
+$2000-$2007  PPU registers (mirrored to $3FFF)
+$4000-$4017  APU/IO registers
+$4014        OAM DMA
+$4016-$4017  Controller ports
+$6000-$7FFF  PRG RAM (battery-backed)
+$8000-$FFFF  PRG ROM (mapper-controlled)
 ```
 
-## References
+## CLI Options
 
-- [NESdev Wiki](https://www.nesdev.org/wiki/) - Comprehensive NES documentation
-- [6502 Reference](http://www.obelisk.me.uk/6502/reference.html) - CPU instruction set
-- [NES ROM Header](https://www.nesdev.org/wiki/INES) - iNES file format
-- [PPU Rendering](https://www.nesdev.org/wiki/PPU_rendering) - Detailed PPU docs
+```
+tui-nes <rom.nes> [options]
+
+Rendering:
+  --kitty           Kitty graphics (default)
+  --terminal        Unicode half-blocks
+  --ascii           ASCII characters
+  --scale <n>       Fixed scale for Kitty
+  --width/height    Display size for terminal/ascii
+
+Input:
+  --list-gamepads   Show detected controllers
+  --debug-gamepad   Raw HID data for debugging
+  --no-gamepad      Disable gamepad support
+```
+
+## Key Implementation Details
+
+### PPU Timing
+- Visible scanlines: 0-239
+- Vblank starts: scanline 241, cycle 1 (sets NMI flag)
+- Pre-render scanline: 261 (clears flags, copies vertical scroll)
+- Sprite evaluation happens at cycle 257 (prepares for next scanline)
+
+### Scroll Handling
+PPU uses loopy registers (v, t, x, w) for scrolling:
+- `t` holds pending scroll values written via $2005/$2006
+- `v` is the active VRAM address used during rendering
+- Horizontal scroll copied at cycle 257, vertical at cycles 280-304 of pre-render
+
+### MMC3 Scanline Counter
+Counts rising edges of PPU A12 (typically when switching from BG to sprite pattern table). Requires tracking A12 state in `ppuRead()`.
+
+### Controller Polling
+NES controller uses shift register. Write $01 then $00 to $4016 to latch, then read 8 times to get each button. Button state is captured at latch time, not read time.
+
+## Testing
+
+```bash
+npm test                 # Watch mode
+npm run test:run         # Single run
+```
+
+Use nestest.nes ROM for CPU verification. Check logs against known-good nestest output.
+
+## Dependencies
+
+- **chalk**: Terminal colors
+- **node-hid**: HID device access for gamepads (prebuilt binaries)
+- **ink/react**: Available but unused (raw ANSI used instead)
+
+## Common Tasks
+
+### Adding a New Mapper
+1. Add case to `createMapper()` switch in `mapper.ts`
+2. Implement `Mapper` interface with bank switching logic
+3. If IRQ needed, implement `irqPending()` and `acknowledgeIrq()`
+
+### Debugging Graphics Issues
+- Check nametable mirroring (mapper's `mirrorMode`)
+- Verify scroll register handling (v/t manipulation)
+- Check pattern table address calculation
+- Sprite 0 hit requires both BG and sprite pixels opaque
+
+### Debugging Input Issues
+- Use `--debug-gamepad` to see raw HID bytes
+- Check gamepad profile byte offsets in `gamepad-profiles.ts`
+- For keyboard, check if Kitty mode is detected (affects key release behavior)
