@@ -30,6 +30,8 @@ export function createMapper(mapperNumber: number, cartridge: Cartridge): Mapper
       return new Mapper4(cartridge);
     case 7:
       return new Mapper7(cartridge);
+    case 9:
+      return new Mapper9(cartridge);
     default:
       console.warn(`Mapper ${mapperNumber} not implemented, using Mapper 0`);
       return new Mapper0(cartridge);
@@ -370,6 +372,120 @@ export class Mapper7 implements Mapper {
     if (address < 0x2000) {
       // CHR RAM is writable
       this.cartridge.chrRam[address] = data;
+    }
+  }
+}
+
+// Mapper 9: MMC2
+// Used only by Punch-Out!! - has unique tile-based CHR bank switching for animation
+export class Mapper9 implements Mapper {
+  private cartridge: Cartridge;
+
+  // PRG bank (8KB at $8000-$9FFF)
+  private prgBank: number = 0;
+
+  // CHR banks - two banks per 4KB region, switched by tile fetch
+  private chrBank0Latch0: number = 0; // $0000-$0FFF when latch0 is active
+  private chrBank0Latch1: number = 0; // $0000-$0FFF when latch1 is active
+  private chrBank1Latch0: number = 0; // $1000-$1FFF when latch0 is active
+  private chrBank1Latch1: number = 0; // $1000-$1FFF when latch1 is active
+
+  // Latches (select which CHR bank register is active)
+  private latch0: number = 0; // 0 = use chrBank0Latch0, 1 = use chrBank0Latch1
+  private latch1: number = 0; // 0 = use chrBank1Latch0, 1 = use chrBank1Latch1
+
+  mirrorMode: number = 0;
+
+  constructor(cartridge: Cartridge) {
+    this.cartridge = cartridge;
+    this.mirrorMode = cartridge.header.mirrorMode;
+  }
+
+  cpuRead(address: number): number {
+    if (address >= 0xa000) {
+      // $A000-$FFFF: Fixed to last three 8KB banks
+      const lastBanks = this.cartridge.prgRom.length - 24576; // Last 24KB
+      return this.cartridge.prgRom[lastBanks + (address - 0xa000)];
+    } else if (address >= 0x8000) {
+      // $8000-$9FFF: Switchable 8KB bank
+      return this.cartridge.prgRom[(this.prgBank * 8192 + (address - 0x8000)) % this.cartridge.prgRom.length];
+    } else if (address >= 0x6000) {
+      return this.cartridge.prgRam[address & 0x1fff];
+    }
+    return 0;
+  }
+
+  cpuWrite(address: number, data: number): void {
+    if (address >= 0xf000) {
+      // $F000-$FFFF: Mirroring
+      this.mirrorMode = (data & 0x01) ? 0 : 1; // 0=horizontal, 1=vertical
+    } else if (address >= 0xe000) {
+      // $E000-$EFFF: CHR bank 1, latch 1
+      this.chrBank1Latch1 = data & 0x1f;
+    } else if (address >= 0xd000) {
+      // $D000-$DFFF: CHR bank 1, latch 0
+      this.chrBank1Latch0 = data & 0x1f;
+    } else if (address >= 0xc000) {
+      // $C000-$CFFF: CHR bank 0, latch 1
+      this.chrBank0Latch1 = data & 0x1f;
+    } else if (address >= 0xb000) {
+      // $B000-$BFFF: CHR bank 0, latch 0
+      this.chrBank0Latch0 = data & 0x1f;
+    } else if (address >= 0xa000) {
+      // $A000-$AFFF: PRG bank select
+      this.prgBank = data & 0x0f;
+    } else if (address >= 0x6000) {
+      this.cartridge.prgRam[address & 0x1fff] = data;
+    }
+  }
+
+  ppuRead(address: number): number {
+    if (address < 0x2000) {
+      let bank: number;
+      let offset: number;
+
+      if (address < 0x1000) {
+        // $0000-$0FFF: Use latch0 to select bank
+        bank = this.latch0 === 0 ? this.chrBank0Latch0 : this.chrBank0Latch1;
+        offset = address;
+      } else {
+        // $1000-$1FFF: Use latch1 to select bank
+        bank = this.latch1 === 0 ? this.chrBank1Latch0 : this.chrBank1Latch1;
+        offset = address - 0x1000;
+      }
+
+      const result = this.cartridge.chrRom[(bank * 4096 + offset) % this.cartridge.chrRom.length];
+
+      // Update latches based on tile fetched
+      // Tiles $FD and $FE trigger latch changes (checked after the read)
+      this.updateLatches(address);
+
+      return result;
+    }
+    return 0;
+  }
+
+  ppuWrite(address: number, data: number): void {
+    // MMC2 uses CHR ROM, writes are ignored
+  }
+
+  /**
+   * Update latches based on the address being read
+   * The latch switches when reading from specific tile addresses
+   */
+  private updateLatches(address: number): void {
+    if (address >= 0x0fd8 && address <= 0x0fdf) {
+      // Reading tile $FD from pattern table 0
+      this.latch0 = 0;
+    } else if (address >= 0x0fe8 && address <= 0x0fef) {
+      // Reading tile $FE from pattern table 0
+      this.latch0 = 1;
+    } else if (address >= 0x1fd8 && address <= 0x1fdf) {
+      // Reading tile $FD from pattern table 1
+      this.latch1 = 0;
+    } else if (address >= 0x1fe8 && address <= 0x1fef) {
+      // Reading tile $FE from pattern table 1
+      this.latch1 = 1;
     }
   }
 }
