@@ -8,7 +8,7 @@ import { GamepadManager } from './input/gamepad-manager.js';
 import { TerminalRenderer } from './ppu/renderer.js';
 import { KittyRenderer } from './ppu/kitty-renderer.js';
 import { APU } from './apu/apu.js';
-import { AudioManager } from './apu/audio-manager.js';
+import Speaker from 'speaker';
 
 export type RenderMode = 'terminal' | 'kitty' | 'ascii';
 
@@ -45,7 +45,7 @@ export class Emulator {
   private renderer: Renderer;
   private renderMode: RenderMode;
   private apu: APU;
-  private audioManager: AudioManager | null = null;
+  private speaker: Speaker | null = null;
   private audioEnabled: boolean = true;
 
   private running: boolean = false;
@@ -177,9 +177,9 @@ export class Emulator {
     process.stdout.write(this.renderer.hideCursor());
     process.stdout.write(this.renderer.clearScreen());
 
-    // Setup audio output (async - worker thread initialization)
+    // Setup audio output
     if (this.audioEnabled) {
-      await this.setupAudio();
+      this.setupAudio();
     }
 
     // Setup stdin first (needed for Kitty detection)
@@ -244,23 +244,59 @@ export class Emulator {
     this.running = false;
   }
 
-  private async setupAudio(): Promise<void> {
-    // Create audio manager with worker thread
-    this.audioManager = new AudioManager(this.apu.getSampleRate());
+  private setupAudio(): void {
+    const sampleRate = this.apu.getSampleRate();
 
-    // Start the audio worker
-    const success = await this.audioManager.start();
-    if (!success) {
+    // Create speaker for direct audio output
+    this.speaker = new Speaker({
+      channels: 1,
+      bitDepth: 16,
+      sampleRate: sampleRate,
+    });
+
+    // Handle speaker errors silently
+    this.speaker.on('error', () => {
       this.audioEnabled = false;
-      this.audioManager = null;
-      return;
-    }
+      this.speaker = null;
+    });
 
-    // Connect APU sample output to audio manager
-    // The manager handles conversion and playback on a worker thread
+    // Track audio timing to stay in sync with real-time
+    let audioStartTime = performance.now();
+    let samplesWritten = 0;
+    const maxAheadMs = 15; // Drop audio if more than 15ms ahead
+
+    // Connect APU sample output directly to speaker
     this.apu.onSamplesReady = (samples: Float32Array) => {
-      if (this.audioManager && this.audioEnabled) {
-        this.audioManager.writeSamples(samples);
+      if (this.speaker && this.audioEnabled) {
+        const now = performance.now();
+        const elapsedMs = now - audioStartTime;
+        const expectedSamples = (elapsedMs / 1000) * sampleRate;
+        const aheadSamples = samplesWritten - expectedSamples;
+        const aheadMs = (aheadSamples / sampleRate) * 1000;
+
+        // If we're too far ahead, skip this batch (don't reset counters)
+        if (aheadMs > maxAheadMs) {
+          // Adjust samplesWritten to pretend we wrote, keeping us in sync
+          // This effectively "catches up" without resetting
+          samplesWritten = expectedSamples + (maxAheadMs / 1000) * sampleRate;
+          return;
+        }
+
+        // If we've drifted too far behind (negative aheadMs), resync
+        if (aheadMs < -100) {
+          audioStartTime = now;
+          samplesWritten = 0;
+        }
+
+        // Allocate fresh buffer each time to avoid async corruption
+        const buffer = Buffer.alloc(samples.length * 2);
+        for (let i = 0; i < samples.length; i++) {
+          const sample = Math.max(-1, Math.min(1, samples[i]));
+          const int16 = (sample * 32767) | 0;
+          buffer.writeInt16LE(int16, i * 2);
+        }
+        this.speaker.write(buffer);
+        samplesWritten += samples.length;
       }
     };
   }
@@ -290,11 +326,11 @@ export class Emulator {
       this.gamepadManager.stop();
     }
 
-    // Stop audio worker
-    if (this.audioManager) {
+    // Stop audio
+    if (this.speaker) {
       this.apu.onSamplesReady = null;
-      this.audioManager.stop();
-      this.audioManager = null;
+      this.speaker.end();
+      this.speaker = null;
     }
 
     // Stop global keyboard listener

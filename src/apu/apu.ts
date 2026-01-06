@@ -499,8 +499,8 @@ export class APU {
 
   constructor() {
     this.cyclesPerSample = Math.floor(this.cpuFrequency / this.sampleRate);
-    // Smaller buffer = more frequent flushes = less latency
-    this.sampleBuffer = new Float32Array(512);
+    // Small buffer for low latency (~5.8ms at 44100Hz)
+    this.sampleBuffer = new Float32Array(256);
     this.reset();
   }
 
