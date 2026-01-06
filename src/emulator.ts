@@ -7,6 +7,8 @@ import { InputManager } from './input/input-manager.js';
 import { GamepadManager } from './input/gamepad-manager.js';
 import { TerminalRenderer } from './ppu/renderer.js';
 import { KittyRenderer } from './ppu/kitty-renderer.js';
+import { APU } from './apu/apu.js';
+import Speaker from 'speaker';
 
 export type RenderMode = 'terminal' | 'kitty' | 'ascii';
 
@@ -28,6 +30,7 @@ export interface EmulatorOptions {
   renderMode?: RenderMode;
   scale?: number;  // For Kitty renderer
   enableGamepad?: boolean;  // Enable gamepad/controller support
+  enableAudio?: boolean;  // Enable audio output (default: true)
 }
 
 export class Emulator {
@@ -41,6 +44,9 @@ export class Emulator {
   private gamepadManager: GamepadManager | null = null;
   private renderer: Renderer;
   private renderMode: RenderMode;
+  private apu: APU;
+  private speaker: Speaker | null = null;
+  private audioEnabled: boolean = true;
 
   private running: boolean = false;
   private frameCount: number = 0;
@@ -55,12 +61,15 @@ export class Emulator {
     this.cpu = new CPU(this.bus);
     this.controller1 = new Controller();
     this.controller2 = new Controller();
+    this.apu = new APU();
+    this.audioEnabled = options.enableAudio !== false;
 
     // Connect components
     this.bus.connectPPU(this.ppu);
     this.bus.connectCartridge(this.cartridge);
     this.bus.connectController(1, this.controller1);
     this.bus.connectController(2, this.controller2);
+    this.bus.connectAPU(this.apu);
     this.ppu.connectCartridge(this.cartridge);
 
     // Initialize input manager with controllers
@@ -97,6 +106,7 @@ export class Emulator {
   reset(): void {
     this.cpu.reset();
     this.ppu.reset();
+    this.apu.reset();
     this.bus.reset();
     this.frameCount = 0;
   }
@@ -122,6 +132,16 @@ export class Emulator {
         this.cpu.irq();
         // Don't acknowledge here - let the game do it by writing to $E000
       }
+    }
+
+    // APU runs at CPU speed
+    for (let i = 0; i < cpuCycles; i++) {
+      this.apu.clock();
+    }
+
+    // Check for APU IRQ
+    if (this.apu.irqPending()) {
+      this.cpu.irq();
     }
 
     // Handle DMA if needed
@@ -156,6 +176,11 @@ export class Emulator {
     // Setup terminal
     process.stdout.write(this.renderer.hideCursor());
     process.stdout.write(this.renderer.clearScreen());
+
+    // Setup audio output
+    if (this.audioEnabled) {
+      this.setupAudio();
+    }
 
     // Setup stdin first (needed for Kitty detection)
     this.setupStdin();
@@ -219,6 +244,36 @@ export class Emulator {
     this.running = false;
   }
 
+  private setupAudio(): void {
+    // Create speaker for audio output
+    this.speaker = new Speaker({
+      channels: 1,
+      bitDepth: 16,
+      sampleRate: this.apu.getSampleRate(),
+    });
+
+    // Handle speaker errors silently (e.g., no audio device)
+    this.speaker.on('error', () => {
+      this.audioEnabled = false;
+      this.speaker = null;
+    });
+
+    // Connect APU sample output to speaker
+    this.apu.onSamplesReady = (samples: Float32Array) => {
+      if (this.speaker && this.audioEnabled) {
+        // Convert float samples to 16-bit PCM
+        const buffer = Buffer.alloc(samples.length * 2);
+        for (let i = 0; i < samples.length; i++) {
+          // Clamp and convert to 16-bit signed integer
+          const sample = Math.max(-1, Math.min(1, samples[i]));
+          const int16 = Math.floor(sample * 32767);
+          buffer.writeInt16LE(int16, i * 2);
+        }
+        this.speaker.write(buffer);
+      }
+    };
+  }
+
   private setupStdin(): void {
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
@@ -242,6 +297,13 @@ export class Emulator {
     // Stop gamepad manager
     if (this.gamepadManager) {
       this.gamepadManager.stop();
+    }
+
+    // Stop audio
+    if (this.speaker) {
+      this.apu.onSamplesReady = null;
+      this.speaker.end();
+      this.speaker = null;
     }
 
     // Stop global keyboard listener

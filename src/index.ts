@@ -20,6 +20,7 @@ Options:
   --height <n>      Set display height in characters (terminal/ascii mode)
   --list-gamepads   List detected gamepad/controller devices and exit
   --no-gamepad      Disable gamepad support
+  --no-audio        Disable audio output
   --debug-gamepad   Show raw gamepad HID data (for debugging)
   --help            Show this help message
 
@@ -49,6 +50,7 @@ function parseArgs(args: string[]): {
   help: boolean;
   listGamepads: boolean;
   enableGamepad: boolean;
+  enableAudio: boolean;
   debugGamepad: boolean;
 } {
   const result = {
@@ -61,6 +63,7 @@ function parseArgs(args: string[]): {
     help: false,
     listGamepads: false,
     enableGamepad: true,
+    enableAudio: true,
     debugGamepad: false,
   };
 
@@ -87,6 +90,8 @@ function parseArgs(args: string[]): {
       result.listGamepads = true;
     } else if (arg === '--no-gamepad') {
       result.enableGamepad = false;
+    } else if (arg === '--no-audio') {
+      result.enableAudio = false;
     } else if (arg === '--debug-gamepad') {
       result.debugGamepad = true;
     } else if (!arg.startsWith('-')) {
@@ -293,6 +298,7 @@ async function main(): Promise<void> {
       renderMode: options.renderMode,
       scale: options.scale,
       enableGamepad: options.enableGamepad,
+      enableAudio: options.enableAudio,
     });
 
     await emulator.run();

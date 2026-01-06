@@ -1,72 +1,736 @@
-// APU (Audio Processing Unit) - Placeholder
-// Full implementation would include:
-// - 2 Pulse wave channels
-// - 1 Triangle wave channel
-// - 1 Noise channel
-// - 1 DMC (Delta Modulation Channel)
+// APU (Audio Processing Unit) - Full Implementation
+// NES APU has 5 channels: 2 pulse, 1 triangle, 1 noise, 1 DMC
 
+// Length counter lookup table
+const LENGTH_TABLE = [
+  10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14,
+  12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30,
+];
+
+// Duty cycle waveforms for pulse channels
+const DUTY_TABLE = [
+  [0, 0, 0, 0, 0, 0, 0, 1], // 12.5%
+  [0, 0, 0, 0, 0, 0, 1, 1], // 25%
+  [0, 0, 0, 0, 1, 1, 1, 1], // 50%
+  [1, 1, 1, 1, 1, 1, 0, 0], // 25% negated
+];
+
+// Triangle channel waveform (32 steps)
+const TRIANGLE_TABLE = [
+  15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+];
+
+// Noise channel period lookup (NTSC)
+const NOISE_TABLE = [
+  4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
+];
+
+// DMC rate table (NTSC)
+const DMC_TABLE = [
+  428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54,
+];
+
+// Pulse channel
+class PulseChannel {
+  // Registers
+  private dutyCycle: number = 0;
+  private lengthHalt: boolean = false;
+  private constantVolume: boolean = false;
+  private volume: number = 0;
+  private sweepEnabled: boolean = false;
+  private sweepPeriod: number = 0;
+  private sweepNegate: boolean = false;
+  private sweepShift: number = 0;
+  private timerPeriod: number = 0;
+  private lengthCounter: number = 0;
+
+  // Internal state
+  private timerValue: number = 0;
+  private sequencePos: number = 0;
+  private envelopeStart: boolean = false;
+  private envelopeVolume: number = 0;
+  private envelopeValue: number = 0;
+  private sweepReload: boolean = false;
+  private sweepValue: number = 0;
+  enabled: boolean = false;
+
+  // For sweep negate difference between pulse 1 and 2
+  constructor(private channel: 1 | 2) {}
+
+  writeControl(data: number): void {
+    this.dutyCycle = (data >> 6) & 0x03;
+    this.lengthHalt = (data & 0x20) !== 0;
+    this.constantVolume = (data & 0x10) !== 0;
+    this.volume = data & 0x0f;
+  }
+
+  writeSweep(data: number): void {
+    this.sweepEnabled = (data & 0x80) !== 0;
+    this.sweepPeriod = (data >> 4) & 0x07;
+    this.sweepNegate = (data & 0x08) !== 0;
+    this.sweepShift = data & 0x07;
+    this.sweepReload = true;
+  }
+
+  writeTimerLow(data: number): void {
+    this.timerPeriod = (this.timerPeriod & 0x700) | data;
+  }
+
+  writeTimerHigh(data: number): void {
+    this.timerPeriod = (this.timerPeriod & 0x0ff) | ((data & 0x07) << 8);
+    if (this.enabled) {
+      this.lengthCounter = LENGTH_TABLE[(data >> 3) & 0x1f];
+    }
+    this.sequencePos = 0;
+    this.envelopeStart = true;
+  }
+
+  clockTimer(): void {
+    if (this.timerValue === 0) {
+      this.timerValue = this.timerPeriod;
+      this.sequencePos = (this.sequencePos + 1) & 0x07;
+    } else {
+      this.timerValue--;
+    }
+  }
+
+  clockEnvelope(): void {
+    if (this.envelopeStart) {
+      this.envelopeStart = false;
+      this.envelopeVolume = 15;
+      this.envelopeValue = this.volume;
+    } else if (this.envelopeValue > 0) {
+      this.envelopeValue--;
+    } else {
+      if (this.envelopeVolume > 0) {
+        this.envelopeVolume--;
+      } else if (this.lengthHalt) {
+        this.envelopeVolume = 15;
+      }
+      this.envelopeValue = this.volume;
+    }
+  }
+
+  clockLength(): void {
+    if (!this.lengthHalt && this.lengthCounter > 0) {
+      this.lengthCounter--;
+    }
+  }
+
+  clockSweep(): void {
+    if (this.sweepValue === 0 && this.sweepEnabled && this.sweepShift > 0 && !this.isMuted()) {
+      const delta = this.timerPeriod >> this.sweepShift;
+      if (this.sweepNegate) {
+        this.timerPeriod -= delta;
+        if (this.channel === 1) {
+          this.timerPeriod--;
+        }
+      } else {
+        this.timerPeriod += delta;
+      }
+    }
+    if (this.sweepValue === 0 || this.sweepReload) {
+      this.sweepValue = this.sweepPeriod;
+      this.sweepReload = false;
+    } else {
+      this.sweepValue--;
+    }
+  }
+
+  private isMuted(): boolean {
+    return this.timerPeriod < 8 || this.timerPeriod > 0x7ff;
+  }
+
+  output(): number {
+    if (!this.enabled || this.lengthCounter === 0 || this.isMuted()) {
+      return 0;
+    }
+    if (DUTY_TABLE[this.dutyCycle][this.sequencePos] === 0) {
+      return 0;
+    }
+    return this.constantVolume ? this.volume : this.envelopeVolume;
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.lengthCounter = 0;
+    }
+  }
+
+  getLengthCounter(): number {
+    return this.lengthCounter;
+  }
+}
+
+// Triangle channel
+class TriangleChannel {
+  private linearCounterLoad: number = 0;
+  private lengthHalt: boolean = false;
+  private timerPeriod: number = 0;
+  private lengthCounter: number = 0;
+
+  private timerValue: number = 0;
+  private sequencePos: number = 0;
+  private linearCounter: number = 0;
+  private linearReload: boolean = false;
+  enabled: boolean = false;
+
+  writeControl(data: number): void {
+    this.lengthHalt = (data & 0x80) !== 0;
+    this.linearCounterLoad = data & 0x7f;
+  }
+
+  writeTimerLow(data: number): void {
+    this.timerPeriod = (this.timerPeriod & 0x700) | data;
+  }
+
+  writeTimerHigh(data: number): void {
+    this.timerPeriod = (this.timerPeriod & 0x0ff) | ((data & 0x07) << 8);
+    if (this.enabled) {
+      this.lengthCounter = LENGTH_TABLE[(data >> 3) & 0x1f];
+    }
+    this.linearReload = true;
+  }
+
+  clockTimer(): void {
+    if (this.timerValue === 0) {
+      this.timerValue = this.timerPeriod;
+      if (this.lengthCounter > 0 && this.linearCounter > 0) {
+        this.sequencePos = (this.sequencePos + 1) & 0x1f;
+      }
+    } else {
+      this.timerValue--;
+    }
+  }
+
+  clockLinear(): void {
+    if (this.linearReload) {
+      this.linearCounter = this.linearCounterLoad;
+    } else if (this.linearCounter > 0) {
+      this.linearCounter--;
+    }
+    if (!this.lengthHalt) {
+      this.linearReload = false;
+    }
+  }
+
+  clockLength(): void {
+    if (!this.lengthHalt && this.lengthCounter > 0) {
+      this.lengthCounter--;
+    }
+  }
+
+  output(): number {
+    if (!this.enabled || this.lengthCounter === 0 || this.linearCounter === 0) {
+      return 0;
+    }
+    // Silence ultrasonic frequencies
+    if (this.timerPeriod < 2) {
+      return 0;
+    }
+    return TRIANGLE_TABLE[this.sequencePos];
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.lengthCounter = 0;
+    }
+  }
+
+  getLengthCounter(): number {
+    return this.lengthCounter;
+  }
+}
+
+// Noise channel
+class NoiseChannel {
+  private lengthHalt: boolean = false;
+  private constantVolume: boolean = false;
+  private volume: number = 0;
+  private mode: boolean = false;
+  private timerPeriod: number = 0;
+  private lengthCounter: number = 0;
+
+  private timerValue: number = 0;
+  private shiftRegister: number = 1;
+  private envelopeStart: boolean = false;
+  private envelopeVolume: number = 0;
+  private envelopeValue: number = 0;
+  enabled: boolean = false;
+
+  writeControl(data: number): void {
+    this.lengthHalt = (data & 0x20) !== 0;
+    this.constantVolume = (data & 0x10) !== 0;
+    this.volume = data & 0x0f;
+  }
+
+  writeMode(data: number): void {
+    this.mode = (data & 0x80) !== 0;
+    this.timerPeriod = NOISE_TABLE[data & 0x0f];
+  }
+
+  writeLength(data: number): void {
+    if (this.enabled) {
+      this.lengthCounter = LENGTH_TABLE[(data >> 3) & 0x1f];
+    }
+    this.envelopeStart = true;
+  }
+
+  clockTimer(): void {
+    if (this.timerValue === 0) {
+      this.timerValue = this.timerPeriod;
+      const bit = this.mode ? 6 : 1;
+      const feedback = (this.shiftRegister & 1) ^ ((this.shiftRegister >> bit) & 1);
+      this.shiftRegister = (this.shiftRegister >> 1) | (feedback << 14);
+    } else {
+      this.timerValue--;
+    }
+  }
+
+  clockEnvelope(): void {
+    if (this.envelopeStart) {
+      this.envelopeStart = false;
+      this.envelopeVolume = 15;
+      this.envelopeValue = this.volume;
+    } else if (this.envelopeValue > 0) {
+      this.envelopeValue--;
+    } else {
+      if (this.envelopeVolume > 0) {
+        this.envelopeVolume--;
+      } else if (this.lengthHalt) {
+        this.envelopeVolume = 15;
+      }
+      this.envelopeValue = this.volume;
+    }
+  }
+
+  clockLength(): void {
+    if (!this.lengthHalt && this.lengthCounter > 0) {
+      this.lengthCounter--;
+    }
+  }
+
+  output(): number {
+    if (!this.enabled || this.lengthCounter === 0 || (this.shiftRegister & 1) !== 0) {
+      return 0;
+    }
+    return this.constantVolume ? this.volume : this.envelopeVolume;
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.lengthCounter = 0;
+    }
+  }
+
+  getLengthCounter(): number {
+    return this.lengthCounter;
+  }
+}
+
+// DMC (Delta Modulation Channel)
+class DMCChannel {
+  private irqEnabled: boolean = false;
+  private loop: boolean = false;
+  private ratePeriod: number = 0;
+  private directLoad: number = 0;
+  private sampleAddress: number = 0;
+  private sampleLength: number = 0;
+
+  private timerValue: number = 0;
+  private outputLevel: number = 0;
+  private currentAddress: number = 0;
+  private bytesRemaining: number = 0;
+  private sampleBuffer: number = 0;
+  private sampleBufferEmpty: boolean = true;
+  private shiftRegister: number = 0;
+  private bitsRemaining: number = 0;
+  private silence: boolean = true;
+  enabled: boolean = false;
+  irqPending: boolean = false;
+
+  // Memory read callback (set by APU)
+  readMemory: ((address: number) => number) | null = null;
+
+  writeControl(data: number): void {
+    this.irqEnabled = (data & 0x80) !== 0;
+    this.loop = (data & 0x40) !== 0;
+    this.ratePeriod = DMC_TABLE[data & 0x0f];
+    if (!this.irqEnabled) {
+      this.irqPending = false;
+    }
+  }
+
+  writeDirectLoad(data: number): void {
+    this.outputLevel = data & 0x7f;
+  }
+
+  writeAddress(data: number): void {
+    this.sampleAddress = 0xc000 | (data << 6);
+  }
+
+  writeLength(data: number): void {
+    this.sampleLength = (data << 4) | 1;
+  }
+
+  clockTimer(): void {
+    if (this.timerValue === 0) {
+      this.timerValue = this.ratePeriod;
+      this.clockOutput();
+    } else {
+      this.timerValue--;
+    }
+  }
+
+  private clockOutput(): void {
+    if (!this.silence) {
+      if ((this.shiftRegister & 1) !== 0) {
+        if (this.outputLevel <= 125) {
+          this.outputLevel += 2;
+        }
+      } else {
+        if (this.outputLevel >= 2) {
+          this.outputLevel -= 2;
+        }
+      }
+      this.shiftRegister >>= 1;
+    }
+
+    this.bitsRemaining--;
+    if (this.bitsRemaining === 0) {
+      this.bitsRemaining = 8;
+      if (this.sampleBufferEmpty) {
+        this.silence = true;
+      } else {
+        this.silence = false;
+        this.shiftRegister = this.sampleBuffer;
+        this.sampleBufferEmpty = true;
+        this.fillSampleBuffer();
+      }
+    }
+  }
+
+  private fillSampleBuffer(): void {
+    if (this.bytesRemaining > 0 && this.readMemory) {
+      this.sampleBuffer = this.readMemory(this.currentAddress);
+      this.sampleBufferEmpty = false;
+      this.currentAddress = 0x8000 | ((this.currentAddress + 1) & 0x7fff);
+      this.bytesRemaining--;
+
+      if (this.bytesRemaining === 0) {
+        if (this.loop) {
+          this.restart();
+        } else if (this.irqEnabled) {
+          this.irqPending = true;
+        }
+      }
+    }
+  }
+
+  restart(): void {
+    this.currentAddress = this.sampleAddress;
+    this.bytesRemaining = this.sampleLength;
+  }
+
+  output(): number {
+    return this.outputLevel;
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.bytesRemaining = 0;
+    } else if (this.bytesRemaining === 0) {
+      this.restart();
+      if (this.sampleBufferEmpty) {
+        this.fillSampleBuffer();
+      }
+    }
+  }
+
+  getBytesRemaining(): number {
+    return this.bytesRemaining;
+  }
+}
+
+// Main APU class
 export class APU {
-  // APU registers
-  private pulse1: Uint8Array = new Uint8Array(4);
-  private pulse2: Uint8Array = new Uint8Array(4);
-  private triangle: Uint8Array = new Uint8Array(4);
-  private noise: Uint8Array = new Uint8Array(4);
-  private dmc: Uint8Array = new Uint8Array(4);
-  private status: number = 0;
+  private pulse1: PulseChannel = new PulseChannel(1);
+  private pulse2: PulseChannel = new PulseChannel(2);
+  private triangle: TriangleChannel = new TriangleChannel();
+  private noise: NoiseChannel = new NoiseChannel();
+  private dmc: DMCChannel = new DMCChannel();
+
+  // Frame counter
+  private frameCounterMode: number = 0; // 0 = 4-step, 1 = 5-step
+  private frameIRQInhibit: boolean = false;
+  private frameIRQPending: boolean = false;
+  private frameValue: number = 0;
+
+  // Timing
+  private cycleCount: number = 0;
+
+  // Audio output
+  private sampleRate: number = 44100;
+  private cpuFrequency: number = 1789773; // NTSC
+  private sampleBuffer: Float32Array;
+  private sampleIndex: number = 0;
+  private cyclesPerSample: number;
+
+  // Memory read callback for DMC
+  private readMemory: ((address: number) => number) | null = null;
+
+  // Audio callback
+  onSamplesReady: ((samples: Float32Array) => void) | null = null;
 
   constructor() {
+    this.cyclesPerSample = this.cpuFrequency / this.sampleRate;
+    this.sampleBuffer = new Float32Array(2048);
     this.reset();
   }
 
+  setMemoryReader(reader: (address: number) => number): void {
+    this.readMemory = reader;
+    this.dmc.readMemory = reader;
+  }
+
   reset(): void {
-    this.pulse1.fill(0);
-    this.pulse2.fill(0);
-    this.triangle.fill(0);
-    this.noise.fill(0);
-    this.dmc.fill(0);
-    this.status = 0;
+    this.pulse1.setEnabled(false);
+    this.pulse2.setEnabled(false);
+    this.triangle.setEnabled(false);
+    this.noise.setEnabled(false);
+    this.dmc.setEnabled(false);
+    this.frameCounterMode = 0;
+    this.frameIRQInhibit = false;
+    this.frameIRQPending = false;
+    this.frameValue = 0;
+    this.cycleCount = 0;
+    this.sampleIndex = 0;
   }
 
   cpuRead(address: number): number {
     if (address === 0x4015) {
       // Status register
-      return this.status;
+      let status = 0;
+      if (this.pulse1.getLengthCounter() > 0) status |= 0x01;
+      if (this.pulse2.getLengthCounter() > 0) status |= 0x02;
+      if (this.triangle.getLengthCounter() > 0) status |= 0x04;
+      if (this.noise.getLengthCounter() > 0) status |= 0x08;
+      if (this.dmc.getBytesRemaining() > 0) status |= 0x10;
+      if (this.frameIRQPending) status |= 0x40;
+      if (this.dmc.irqPending) status |= 0x80;
+      this.frameIRQPending = false;
+      return status;
     }
     return 0;
   }
 
   cpuWrite(address: number, data: number): void {
-    if (address >= 0x4000 && address <= 0x4003) {
+    switch (address) {
       // Pulse 1
-      this.pulse1[address - 0x4000] = data;
-    } else if (address >= 0x4004 && address <= 0x4007) {
+      case 0x4000:
+        this.pulse1.writeControl(data);
+        break;
+      case 0x4001:
+        this.pulse1.writeSweep(data);
+        break;
+      case 0x4002:
+        this.pulse1.writeTimerLow(data);
+        break;
+      case 0x4003:
+        this.pulse1.writeTimerHigh(data);
+        break;
+
       // Pulse 2
-      this.pulse2[address - 0x4004] = data;
-    } else if (address >= 0x4008 && address <= 0x400b) {
+      case 0x4004:
+        this.pulse2.writeControl(data);
+        break;
+      case 0x4005:
+        this.pulse2.writeSweep(data);
+        break;
+      case 0x4006:
+        this.pulse2.writeTimerLow(data);
+        break;
+      case 0x4007:
+        this.pulse2.writeTimerHigh(data);
+        break;
+
       // Triangle
-      this.triangle[address - 0x4008] = data;
-    } else if (address >= 0x400c && address <= 0x400f) {
+      case 0x4008:
+        this.triangle.writeControl(data);
+        break;
+      case 0x400a:
+        this.triangle.writeTimerLow(data);
+        break;
+      case 0x400b:
+        this.triangle.writeTimerHigh(data);
+        break;
+
       // Noise
-      this.noise[address - 0x400c] = data;
-    } else if (address >= 0x4010 && address <= 0x4013) {
+      case 0x400c:
+        this.noise.writeControl(data);
+        break;
+      case 0x400e:
+        this.noise.writeMode(data);
+        break;
+      case 0x400f:
+        this.noise.writeLength(data);
+        break;
+
       // DMC
-      this.dmc[address - 0x4010] = data;
-    } else if (address === 0x4015) {
+      case 0x4010:
+        this.dmc.writeControl(data);
+        break;
+      case 0x4011:
+        this.dmc.writeDirectLoad(data);
+        break;
+      case 0x4012:
+        this.dmc.writeAddress(data);
+        break;
+      case 0x4013:
+        this.dmc.writeLength(data);
+        break;
+
       // Status
-      this.status = data;
-    } else if (address === 0x4017) {
-      // Frame counter - TODO: implement frame counter
+      case 0x4015:
+        this.pulse1.setEnabled((data & 0x01) !== 0);
+        this.pulse2.setEnabled((data & 0x02) !== 0);
+        this.triangle.setEnabled((data & 0x04) !== 0);
+        this.noise.setEnabled((data & 0x08) !== 0);
+        this.dmc.setEnabled((data & 0x10) !== 0);
+        this.dmc.irqPending = false;
+        break;
+
+      // Frame counter
+      case 0x4017:
+        this.frameCounterMode = (data >> 7) & 1;
+        this.frameIRQInhibit = (data & 0x40) !== 0;
+        if (this.frameIRQInhibit) {
+          this.frameIRQPending = false;
+        }
+        if (this.frameCounterMode === 1) {
+          this.clockQuarterFrame();
+          this.clockHalfFrame();
+        }
+        break;
     }
   }
 
-  // Clock the APU (called every CPU cycle)
+  // Clock APU (called every CPU cycle)
   clock(): void {
-    // TODO: Implement APU timing and audio generation
+    // Clock timers (triangle clocks every cycle, others every other cycle)
+    this.triangle.clockTimer();
+
+    if (this.cycleCount % 2 === 0) {
+      this.pulse1.clockTimer();
+      this.pulse2.clockTimer();
+      this.noise.clockTimer();
+      this.dmc.clockTimer();
+    }
+
+    // Frame counter (clocks at ~240Hz in 4-step mode, ~192Hz in 5-step)
+    // Frame counter steps happen at specific CPU cycles
+    const frameStep = Math.floor(this.cycleCount / 7457);
+    if (frameStep !== this.frameValue) {
+      this.frameValue = frameStep;
+
+      if (this.frameCounterMode === 0) {
+        // 4-step mode
+        switch (frameStep % 4) {
+          case 0:
+          case 2:
+            this.clockQuarterFrame();
+            break;
+          case 1:
+            this.clockQuarterFrame();
+            this.clockHalfFrame();
+            break;
+          case 3:
+            this.clockQuarterFrame();
+            this.clockHalfFrame();
+            if (!this.frameIRQInhibit) {
+              this.frameIRQPending = true;
+            }
+            break;
+        }
+      } else {
+        // 5-step mode
+        switch (frameStep % 5) {
+          case 0:
+          case 2:
+            this.clockQuarterFrame();
+            break;
+          case 1:
+          case 4:
+            this.clockQuarterFrame();
+            this.clockHalfFrame();
+            break;
+        }
+      }
+    }
+
+    // Generate sample
+    if (this.cycleCount % Math.floor(this.cyclesPerSample) === 0) {
+      const sample = this.mix();
+      this.sampleBuffer[this.sampleIndex++] = sample;
+
+      if (this.sampleIndex >= this.sampleBuffer.length) {
+        if (this.onSamplesReady) {
+          this.onSamplesReady(this.sampleBuffer);
+        }
+        this.sampleIndex = 0;
+      }
+    }
+
+    this.cycleCount++;
   }
 
-  // Get current audio sample (for audio output)
-  getSample(): number {
-    // TODO: Mix all channels and return audio sample
-    return 0;
+  private clockQuarterFrame(): void {
+    this.pulse1.clockEnvelope();
+    this.pulse2.clockEnvelope();
+    this.triangle.clockLinear();
+    this.noise.clockEnvelope();
+  }
+
+  private clockHalfFrame(): void {
+    this.pulse1.clockLength();
+    this.pulse1.clockSweep();
+    this.pulse2.clockLength();
+    this.pulse2.clockSweep();
+    this.triangle.clockLength();
+    this.noise.clockLength();
+  }
+
+  private mix(): number {
+    const p1 = this.pulse1.output();
+    const p2 = this.pulse2.output();
+    const t = this.triangle.output();
+    const n = this.noise.output();
+    const d = this.dmc.output();
+
+    // NES APU mixer formula (from NESDev wiki)
+    let pulseOut = 0;
+    if (p1 + p2 > 0) {
+      pulseOut = 95.88 / (8128 / (p1 + p2) + 100);
+    }
+
+    let tndOut = 0;
+    if (t + n + d > 0) {
+      tndOut = 159.79 / (1 / (t / 8227 + n / 12241 + d / 22638) + 100);
+    }
+
+    return pulseOut + tndOut;
+  }
+
+  irqPending(): boolean {
+    return this.frameIRQPending || this.dmc.irqPending;
+  }
+
+  getSampleRate(): number {
+    return this.sampleRate;
   }
 }

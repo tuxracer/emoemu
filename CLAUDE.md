@@ -37,8 +37,10 @@ src/
 │   ├── input-manager.ts  # Keyboard input with Kitty protocol detection
 │   ├── gamepad-manager.ts # HID gamepad support via node-hid
 │   └── gamepad-profiles.ts # Controller profiles (Xbox, PlayStation, etc.)
-└── apu/
-    └── apu.ts            # Stub (audio not implemented)
+├── apu/
+│   └── apu.ts            # APU with all 5 channels, frame counter, mixer
+└── types/
+    └── speaker.d.ts      # Type declarations for speaker package
 ```
 
 ## Architecture
@@ -49,9 +51,11 @@ src/
 Per frame (until PPU sets frameComplete):
   1. CPU executes one instruction → returns cycle count
   2. PPU clocks 3x per CPU cycle
-  3. Check PPU NMI (vblank interrupt)
-  4. Check mapper IRQ (MMC3 scanline counter)
-  5. Handle OAM DMA if triggered
+  3. APU clocks 1x per CPU cycle
+  4. Check PPU NMI (vblank interrupt)
+  5. Check mapper IRQ (MMC3 scanline counter)
+  6. Check APU frame counter IRQ
+  7. Handle OAM DMA if triggered
 ```
 
 ### CPU (`cpu/cpu.ts`)
@@ -68,6 +72,16 @@ Per frame (until PPU sets frameComplete):
 - Background: nametables, pattern tables, attribute tables
 - Sprites: 64 in OAM, 8 per scanline limit, sprite 0 hit detection
 - Timing: 341 cycles/scanline, 262 scanlines/frame (NTSC)
+
+### APU (`apu/apu.ts`)
+
+- **Pulse 1 & 2**: Square waves with duty cycle (12.5%, 25%, 50%, 75%), sweep, envelope
+- **Triangle**: Triangle wave with linear counter, no volume control
+- **Noise**: LFSR-based noise with short/long mode
+- **DMC**: Delta modulation channel for sample playback
+- Frame counter: 4-step (with IRQ) or 5-step mode, clocks envelope/length/sweep
+- Mixer: Uses NESDev wiki lookup formula for proper channel mixing
+- Audio output: 44100 Hz sample rate via `speaker` package
 
 ### Mappers (`cartridge/mappers/mapper.ts`)
 
@@ -147,6 +161,9 @@ Input:
   --list-gamepads   Show detected controllers
   --debug-gamepad   Raw HID data for debugging
   --no-gamepad      Disable gamepad support
+
+Audio:
+  --no-audio        Disable audio output
 ```
 
 ## Key Implementation Details
@@ -164,7 +181,7 @@ PPU uses loopy registers (v, t, x, w) for scrolling:
 - Horizontal scroll copied at cycle 257, vertical at cycles 280-304 of pre-render
 
 ### MMC3 Scanline Counter
-Counts rising edges of PPU A12 (typically when switching from BG to sprite pattern table). Requires tracking A12 state in `ppuRead()`.
+PPU notifies mapper at cycle 260 of each visible/pre-render scanline via `notifyScanline()`. Mapper decrements counter and triggers IRQ when counter reaches zero (used by SMB3 for status bar).
 
 ### Controller Polling
 NES controller uses shift register. Write $01 then $00 to $4016 to latch, then read 8 times to get each button. Button state is captured at latch time, not read time.
@@ -182,6 +199,7 @@ Use nestest.nes ROM for CPU verification. Check logs against known-good nestest 
 
 - **chalk**: Terminal colors
 - **node-hid**: HID device access for gamepads (prebuilt binaries)
+- **speaker**: Audio output (uses native audio backend)
 - **ink/react**: Available but unused (raw ANSI used instead)
 
 ## Common Tasks

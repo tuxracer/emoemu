@@ -1,6 +1,7 @@
 import { PPU } from '../ppu/ppu.js';
 import { Cartridge } from '../cartridge/cartridge.js';
 import { Controller } from '../input/controller.js';
+import { APU } from '../apu/apu.js';
 
 export class Bus {
   // 2KB internal RAM
@@ -11,6 +12,7 @@ export class Bus {
   private cartridge: Cartridge | null = null;
   private controller1: Controller | null = null;
   private controller2: Controller | null = null;
+  private apu: APU | null = null;
 
   // DMA
   private dmaPage: number = 0;
@@ -36,6 +38,12 @@ export class Bus {
     }
   }
 
+  connectAPU(apu: APU): void {
+    this.apu = apu;
+    // Give APU access to memory for DMC sample reads
+    apu.setMemoryReader((address) => this.read(address));
+  }
+
   read(address: number): number {
     address &= 0xffff;
 
@@ -47,12 +55,13 @@ export class Bus {
       return this.ppu?.cpuRead(0x2000 + (address & 0x07)) ?? 0;
     } else if (address < 0x4018) {
       // APU and I/O registers
-      if (address === 0x4016) {
+      if (address === 0x4015) {
+        return this.apu?.cpuRead(address) ?? 0;
+      } else if (address === 0x4016) {
         return this.controller1?.read() ?? 0;
       } else if (address === 0x4017) {
         return this.controller2?.read() ?? 0;
       }
-      // APU registers - TODO
       return 0;
     } else if (address < 0x4020) {
       // Normally disabled
@@ -82,8 +91,10 @@ export class Bus {
       } else if (address === 0x4016) {
         this.controller1?.write(data);
         this.controller2?.write(data);
+      } else if (address <= 0x4013 || address === 0x4015 || address === 0x4017) {
+        // APU registers
+        this.apu?.cpuWrite(address, data);
       }
-      // APU registers - TODO
     } else if (address < 0x4020) {
       // Normally disabled
     } else {
