@@ -132,6 +132,8 @@ export class Emulator {
       this.renderer = new KittyRenderer({
         scale: options.scale,  // undefined = auto-fit to terminal
       });
+      // Enable auto-resize when no explicit scale is provided
+      this.autoResize = options.scale === undefined;
     } else if (this.renderMode === 'ascii') {
       // Auto-size to terminal if no explicit dimensions given
       const explicitDims = options.width && options.height;
@@ -253,12 +255,17 @@ export class Emulator {
       this.gamepadManager.start();
     }
 
-    // Set up terminal resize handler (terminal/ascii modes)
+    // Set up terminal resize handler
     if (this.autoResize) {
       this.resizeHandler = () => {
-        const isAscii = this.renderMode === 'ascii';
-        const dims = calculateTerminalDimensions(isAscii);
-        (this.renderer as TerminalRenderer).setDimensions(dims.width, dims.height);
+        if (this.renderMode === 'kitty') {
+          // Kitty renderer recalculates display size internally
+          (this.renderer as KittyRenderer).setDimensions();
+        } else {
+          const isAscii = this.renderMode === 'ascii';
+          const dims = calculateTerminalDimensions(isAscii);
+          (this.renderer as TerminalRenderer).setDimensions(dims.width, dims.height);
+        }
         process.stdout.write(this.renderer.clearScreen());
       };
       process.stdout.on('resize', this.resizeHandler);

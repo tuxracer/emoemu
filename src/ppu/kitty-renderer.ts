@@ -95,6 +95,15 @@ export class KittyRenderer {
     return this.autoScale;
   }
 
+  // Update display dimensions (for terminal resize handling)
+  setDimensions(): void {
+    if (this.autoScale) {
+      const { cols, rows } = this.calculateOptimalDisplaySize();
+      this.displayCols = cols;
+      this.displayRows = rows;
+    }
+  }
+
   // Convert NES frame buffer to RGB data (native resolution - Kitty handles scaling)
   private frameToRgb(frameBuffer: Uint8Array): Uint8Array {
     const rgb = new Uint8Array(NES_WIDTH * NES_HEIGHT * 3);
