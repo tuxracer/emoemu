@@ -176,13 +176,13 @@ The NES controller uses a 4021 shift register that captures the state of all 8 b
 - [ ] Memory bus dispatch table (`memory/bus.ts:47-103`)
   - Sequential if-else checks on every memory access (millions/frame)
   - Use page lookup table: `handlers[address >> 8](address)` for O(1) dispatch
-- [ ] String concatenation in renderer (`ppu/renderer.ts:36-104`)
+- [x] String concatenation in renderer (`ppu/renderer.ts:36-104`)
   - Uses `+=` in hot loop (7,680 concatenations/frame)
   - Switch to array + `.join('')`
-- [ ] Sprite bit reversal lookup table (`ppu/ppu.ts:365-452`)
+- [x] Sprite bit reversal lookup table (`ppu/ppu.ts:365-452`)
   - `reverseBits()` called up to 8× per scanline with 6 bit ops each
   - Pre-compute 256-entry lookup table
-- [ ] Reusable DMA temp buffer (`memory/bus.ts:112`)
+- [x] Reusable DMA temp buffer (`memory/bus.ts:112`)
   - 256-byte allocation per OAM DMA
   - Use reusable class-level buffer
 
@@ -191,7 +191,7 @@ The NES controller uses a 4021 shift register that captures the state of all 8 b
   - `renderPixel()` does 4-6 PPU reads per pixel (61,440×/frame)
   - Cache tile pattern data at start of each 8-pixel tile span
   - Pre-compute attribute shifts per tile instead of per pixel
-- [ ] ASCII luminance lookup table (`ppu/renderer.ts:108-110`)
+- [x] ASCII luminance lookup table (`ppu/renderer.ts:108-110`)
   - Luminance calculated per pixel in ASCII mode
   - Pre-compute for all 64 palette colors at init
 
