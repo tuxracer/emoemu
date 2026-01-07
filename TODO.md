@@ -187,7 +187,7 @@ The NES controller uses a 4021 shift register that captures the state of all 8 b
   - Use reusable class-level buffer
 
 ### Larger Refactors (Highest Impact)
-- [ ] PPU tile data caching (`ppu/ppu.ts:464-596`)
+- [x] PPU tile data caching (`ppu/ppu.ts:464-596`)
   - `renderPixel()` does 4-6 PPU reads per pixel (61,440×/frame)
   - Cache tile pattern data at start of each 8-pixel tile span
   - Pre-compute attribute shifts per tile instead of per pixel

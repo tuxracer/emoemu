@@ -103,6 +103,14 @@ export class PPU {
   private scanlineStartCoarseX: number = 0;
   private scanlineStartNametable: number = 0;
 
+  // Tile cache for background rendering optimization
+  // Caches tile data to avoid 4-6 PPU reads per pixel
+  private tileCacheValid: boolean = false;
+  private tileCacheX: number = -1;  // Which 8-pixel tile span is cached
+  private tileCachePatternLo: number = 0;
+  private tileCachePatternHi: number = 0;
+  private tileCachePalette: number = 0;
+
   // Timing
   scanline: number = 0;
   cycle: number = 0;
@@ -139,6 +147,8 @@ export class PPU {
     this.spriteZeroBeingRendered = false;
     this.scanlineStartCoarseX = 0;
     this.scanlineStartNametable = 0;
+    this.tileCacheValid = false;
+    this.tileCacheX = -1;
   }
 
   connectCartridge(cartridge: Cartridge): void {
@@ -470,6 +480,7 @@ export class PPU {
   }
 
   // Render a single pixel
+  // Uses tile caching to reduce PPU reads from 4-6 per pixel to 4 per 8 pixels
   private renderPixel(): void {
     const screenX = this.cycle - 1;
     const y = this.scanline;
@@ -486,44 +497,52 @@ export class PPU {
         const pixelInTile = scrolledX & 0x07;
         const tileOffset = scrolledX >> 3; // How many tiles from the starting tile
 
-        // Get vertical scroll components from v (these don't change during scanline)
-        const fineY = (this.v >> 12) & 0x07;
-        const coarseY = (this.v >> 5) & 0x1f;
+        // Check if we need to fetch new tile data (every 8 pixels or first pixel)
+        if (this.tileCacheX !== tileOffset) {
+          // Get vertical scroll components from v (these don't change during scanline)
+          const fineY = (this.v >> 12) & 0x07;
+          const coarseY = (this.v >> 5) & 0x1f;
 
-        // Calculate the actual coarse X by adding tile offset to starting position
-        // Handle wraparound and nametable switching
-        let coarseX = this.scanlineStartCoarseX + tileOffset;
-        let nametable = this.scanlineStartNametable;
+          // Calculate the actual coarse X by adding tile offset to starting position
+          // Handle wraparound and nametable switching
+          let coarseX = this.scanlineStartCoarseX + tileOffset;
+          let nametable = this.scanlineStartNametable;
 
-        if (coarseX >= 32) {
-          coarseX -= 32;
-          nametable ^= 1; // Switch horizontal nametable
+          if (coarseX >= 32) {
+            coarseX -= 32;
+            nametable ^= 1; // Switch horizontal nametable
+          }
+
+          // Build nametable address
+          const nametableAddr = 0x2000 | (nametable << 10) | (coarseY << 5) | coarseX;
+          const tileIndex = this.ppuRead(nametableAddr);
+
+          // Calculate pattern table address
+          const patternAddr = ((this.ctrl & CtrlFlag.BACKGROUND_PATTERN) ? 0x1000 : 0) +
+            (tileIndex << 4) + fineY;
+
+          // Cache tile pattern data
+          this.tileCachePatternLo = this.ppuRead(patternAddr);
+          this.tileCachePatternHi = this.ppuRead(patternAddr + 8);
+
+          // Get attribute byte for palette selection
+          const attrX = coarseX >> 2;
+          const attrY = coarseY >> 2;
+          const attrAddr = 0x23c0 | (nametable << 10) | (attrY << 3) | attrX;
+          const attrByte = this.ppuRead(attrAddr);
+
+          // Calculate which quadrant of the attribute byte to use
+          const attrShift = ((coarseY & 2) << 1) | (coarseX & 2);
+          this.tileCachePalette = (attrByte >> attrShift) & 0x03;
+
+          // Mark cache as valid for this tile
+          this.tileCacheX = tileOffset;
         }
 
-        // Build nametable address
-        const nametableAddr = 0x2000 | (nametable << 10) | (coarseY << 5) | coarseX;
-        const tileIndex = this.ppuRead(nametableAddr);
-
-        // Calculate pattern table address
-        const patternAddr = ((this.ctrl & CtrlFlag.BACKGROUND_PATTERN) ? 0x1000 : 0) +
-          (tileIndex << 4) + fineY;
-
-        const patternLo = this.ppuRead(patternAddr);
-        const patternHi = this.ppuRead(patternAddr + 8);
-
-        // Get pixel from pattern (bit 7 is leftmost pixel)
+        // Get pixel from cached pattern (bit 7 is leftmost pixel)
         const bitPos = 7 - pixelInTile;
-        bgPixel = ((patternLo >> bitPos) & 1) | (((patternHi >> bitPos) & 1) << 1);
-
-        // Get attribute byte for palette selection
-        const attrX = coarseX >> 2;
-        const attrY = coarseY >> 2;
-        const attrAddr = 0x23c0 | (nametable << 10) | (attrY << 3) | attrX;
-        const attrByte = this.ppuRead(attrAddr);
-
-        // Calculate which quadrant of the attribute byte to use
-        const attrShift = ((coarseY & 2) << 1) | (coarseX & 2);
-        bgPalette = (attrByte >> attrShift) & 0x03;
+        bgPixel = ((this.tileCachePatternLo >> bitPos) & 1) | (((this.tileCachePatternHi >> bitPos) & 1) << 1);
+        bgPalette = this.tileCachePalette;
       }
     }
 
@@ -650,6 +669,9 @@ export class PPU {
     // Save starting horizontal scroll for this scanline's rendering
     this.scanlineStartCoarseX = this.v & 0x001f;
     this.scanlineStartNametable = (this.v >> 10) & 0x03;
+
+    // Invalidate tile cache for new scanline
+    this.tileCacheX = -1;
   }
 
   // Copy vertical bits from t to v
