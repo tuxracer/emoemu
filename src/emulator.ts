@@ -62,13 +62,14 @@ function calculateTerminalDimensions(asciiMode: boolean): { width: number; heigh
     return { width, height };
   } else {
     // Terminal half-block mode: 1 char = 1x2 NES pixels
-    // Each row represents 2 vertical pixels
+    // Terminal cells are ~1:2 aspect (twice as tall as wide)
+    // Display aspect = width / (height * 2) = 4/3 => width = height * 8/3
     let height = availableRows;
-    let width = Math.floor(height * 2 * 8 / 7.5); // Account for half-blocks
+    let width = Math.floor(height * 8 / 3);
 
     if (width > termCols) {
       width = termCols;
-      height = Math.floor(width * 7.5 / 16);
+      height = Math.floor(width * 3 / 8);
     }
 
     return { width, height };
