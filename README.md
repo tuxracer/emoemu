@@ -15,14 +15,13 @@ A terminal-based NES emulator written in TypeScript. Play classic NES games dire
 
 - Node.js 18+
 - A terminal emulator:
-  - ⭐ **Best experience** (graphics + keyboard protocol):
-    - [Kitty](https://sw.kovidgoyal.net/kitty/)
-    - [Ghostty](https://ghostty.org/)
-    - [WezTerm](https://wezfurlong.org/wezterm/)
-  - 🖼️ **Graphics protocol only**: [Konsole](https://konsole.kde.org/)
-  - ⌨️ **Keyboard protocol only**: [iTerm2](https://iterm2.com/), [Alacritty](https://alacritty.org/), [Foot](https://codeberg.org/dnkl/foot), [Rio](https://raphamorim.io/rio/), Windows Terminal
-  - 👍 **Good experience**: Any terminal with true color support (use `--terminal` mode)
-  - 📟 **Basic**: Any terminal (use `--ascii` mode)
+  - ⭐ **Recommended**: [Ghostty](https://ghostty.org/) - best graphics and keyboard support
+  - ✅ **Full support** (graphics + keyboard protocol): [Kitty](https://sw.kovidgoyal.net/kitty/), [WezTerm](https://wezfurlong.org/wezterm/)
+  - 🖼️ **Graphics only**: [Konsole](https://konsole.kde.org/) - use with gamepad
+  - ⌨️ **Keyboard protocol only**: [iTerm2](https://iterm2.com/), [Alacritty](https://alacritty.org/), [Foot](https://codeberg.org/dnkl/foot), [Rio](https://raphamorim.io/rio/), Windows Terminal - use `--terminal` mode
+  - 👍 **Other terminals**: Use `--terminal` or `--ascii` mode with gamepad
+
+> ⚠️ **Keyboard limitations**: Terminals without Kitty keyboard protocol support cannot detect multiple simultaneous key presses. This affects gameplay requiring combined inputs (e.g., running while jumping). For the best keyboard experience, use Ghostty, Kitty, or WezTerm. Otherwise, a gamepad is recommended.
 
 ## 🚀 Quick Start
 
