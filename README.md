@@ -24,24 +24,23 @@ A terminal-based NES emulator written in TypeScript. Play classic NES games dire
   - 👍 **Good experience**: Any terminal with true color support (use `--terminal` mode)
   - 📟 **Basic**: Any terminal (use `--ascii` mode)
 
+## 🚀 Quick Start
+
+```bash
+npx tui-nes /path/to/game.nes
+```
+
 ## 📦 Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/tui-nes.git
-cd tui-nes
+# Install globally
+npm install -g tui-nes
 
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Run a ROM
-npm start -- /path/to/game.nes
+# Run
+tui-nes /path/to/game.nes
 ```
 
-## 🚀 Usage
+## 🛠️ Usage
 
 ```bash
 tui-nes <rom.nes> [options]
@@ -122,10 +121,13 @@ The emulator runs most NES games that use the supported mappers. Games with adva
 ## 🔧 Building from Source
 
 ```bash
+git clone https://github.com/yourusername/tui-nes.git
+cd tui-nes
 npm install       # Install dependencies
 npm run build     # Build the project
 npm run typecheck # Type check without building
 npm test          # Run tests
+npm start -- /path/to/game.nes
 ```
 
 ## 📁 Project Structure
