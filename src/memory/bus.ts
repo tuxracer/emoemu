@@ -17,6 +17,8 @@ export class Bus {
   // DMA
   private dmaPage: number = 0;
   private dmaTransfer: boolean = false;
+  // Pre-allocated buffer for DMA transfers to avoid allocation per transfer
+  private dmaBuffer: Uint8Array = new Uint8Array(256);
 
   constructor() {
     this.ram.fill(0);
@@ -104,20 +106,20 @@ export class Bus {
   }
 
   // Handle DMA transfer (called from emulator loop)
+  // Uses pre-allocated buffer to avoid allocation per transfer
   doDma(): { active: boolean; data?: Uint8Array } {
     if (!this.dmaTransfer) {
       return { active: false };
     }
 
-    const data = new Uint8Array(256);
     const baseAddr = this.dmaPage << 8;
 
     for (let i = 0; i < 256; i++) {
-      data[i] = this.read(baseAddr + i);
+      this.dmaBuffer[i] = this.read(baseAddr + i);
     }
 
     this.dmaTransfer = false;
-    return { active: true, data };
+    return { active: true, data: this.dmaBuffer };
   }
 
   reset(): void {
