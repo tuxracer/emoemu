@@ -1,5 +1,16 @@
 import { Cartridge } from '../cartridge/cartridge.js';
 
+// Pre-computed bit reversal table for sprite horizontal flip
+// Eliminates 6 bit operations per sprite per scanline
+const REVERSE_BITS_TABLE = new Uint8Array(256);
+for (let i = 0; i < 256; i++) {
+  let b = i;
+  b = ((b & 0xF0) >> 4) | ((b & 0x0F) << 4);
+  b = ((b & 0xCC) >> 2) | ((b & 0x33) << 2);
+  b = ((b & 0xAA) >> 1) | ((b & 0x55) << 1);
+  REVERSE_BITS_TABLE[i] = b;
+}
+
 // PPU registers
 const PPUCTRL = 0x2000;
 const PPUMASK = 0x2001;
@@ -453,11 +464,9 @@ export class PPU {
   }
 
   // Reverse bits in a byte (for horizontal flip)
+  // Uses pre-computed lookup table for O(1) reversal
   private reverseBits(b: number): number {
-    b = ((b & 0xF0) >> 4) | ((b & 0x0F) << 4);
-    b = ((b & 0xCC) >> 2) | ((b & 0x33) << 2);
-    b = ((b & 0xAA) >> 1) | ((b & 0x55) << 1);
-    return b;
+    return REVERSE_BITS_TABLE[b];
   }
 
   // Render a single pixel
