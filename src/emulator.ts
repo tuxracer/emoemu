@@ -95,6 +95,7 @@ export class Emulator {
   private frameCount: number = 0;
   private lastFrameTime: number = 0;
   private targetFrameTime: number = 1000 / 60; // ~16.67ms for 60 FPS
+  private resizeHandler: (() => void) | null = null;
 
   constructor(options: EmulatorOptions) {
     // Initialize components
@@ -251,9 +252,16 @@ export class Emulator {
       this.gamepadManager.start();
     }
 
-    // Track terminal size for resize detection (terminal/ascii modes)
-    let lastTermCols = process.stdout.columns || 0;
-    let lastTermRows = process.stdout.rows || 0;
+    // Set up terminal resize handler (terminal/ascii modes)
+    if (this.autoResize) {
+      this.resizeHandler = () => {
+        const isAscii = this.renderMode === 'ascii';
+        const dims = calculateTerminalDimensions(isAscii);
+        (this.renderer as TerminalRenderer).setDimensions(dims.width, dims.height);
+        process.stdout.write(this.renderer.clearScreen());
+      };
+      process.stdout.on('resize', this.resizeHandler);
+    }
 
     this.lastFrameTime = performance.now();
 
@@ -272,20 +280,6 @@ export class Emulator {
       const elapsed = now - this.lastFrameTime;
 
       if (elapsed >= this.targetFrameTime) {
-        // Check for terminal resize (terminal/ascii modes)
-        if (this.autoResize) {
-          const currentCols = process.stdout.columns || 0;
-          const currentRows = process.stdout.rows || 0;
-          if (currentCols !== lastTermCols || currentRows !== lastTermRows) {
-            lastTermCols = currentCols;
-            lastTermRows = currentRows;
-            const isAscii = this.renderMode === 'ascii';
-            const dims = calculateTerminalDimensions(isAscii);
-            (this.renderer as TerminalRenderer).setDimensions(dims.width, dims.height);
-            process.stdout.write(this.renderer.clearScreen());
-          }
-        }
-
         // Update input state (no-op with true keyup, but kept for API)
         this.inputManager.update();
 
@@ -392,6 +386,12 @@ export class Emulator {
   }
 
   private cleanup(): void {
+    // Remove resize handler
+    if (this.resizeHandler) {
+      process.stdout.off('resize', this.resizeHandler);
+      this.resizeHandler = null;
+    }
+
     // Stop gamepad manager
     if (this.gamepadManager) {
       this.gamepadManager.stop();
