@@ -34,7 +34,7 @@
 - [x] PPU register access ($2000-$2007)
 - [x] OAM DMA ($4014)
 - [x] Controller ports ($4016-$4017)
-- [ ] APU registers ($4000-$4017)
+- [x] APU registers ($4000-$4017)
 
 ### Cartridge
 - [x] iNES file format parsing
@@ -52,12 +52,10 @@
 - [x] Mapper 0 (NROM) - No banking
 - [x] Mapper 1 (MMC1) - Bank switching + mirroring control
 - [x] Mapper 2 (UxROM) - PRG bank switching
-
-### Priority Mappers
-- [ ] Mapper 3 (CNROM) - CHR bank switching
-- [ ] Mapper 4 (MMC3) - Scanline counter, IRQ
-- [ ] Mapper 7 (AxROM) - Single-screen mirroring
-- [ ] Mapper 9 (MMC2) - Punch-Out specific
+- [x] Mapper 3 (CNROM) - CHR bank switching
+- [x] Mapper 4 (MMC3) - Scanline counter, IRQ
+- [x] Mapper 7 (AxROM) - Single-screen mirroring
+- [x] Mapper 9 (MMC2) - Punch-Out tile-based CHR switching
 
 ### Extended Mappers
 - [ ] Mapper 11 (Color Dreams)
@@ -69,24 +67,24 @@
 ## Milestone 3: Audio (APU)
 
 ### Channels
-- [ ] Pulse 1 channel
-- [ ] Pulse 2 channel
-- [ ] Triangle channel
-- [ ] Noise channel
-- [ ] DMC (Delta Modulation Channel)
+- [x] Pulse 1 channel
+- [x] Pulse 2 channel
+- [x] Triangle channel
+- [x] Noise channel
+- [x] DMC (Delta Modulation Channel)
 
 ### APU Features
-- [ ] Frame counter / sequencer
-- [ ] Length counters
-- [ ] Envelope generators
-- [ ] Sweep units (pulse channels)
-- [ ] Linear counter (triangle)
-- [ ] Audio output mixing
+- [x] Frame counter / sequencer
+- [x] Length counters
+- [x] Envelope generators
+- [x] Sweep units (pulse channels)
+- [x] Linear counter (triangle)
+- [x] Audio output mixing (NESDev wiki formula)
 
-### Terminal Audio
-- [ ] Investigate terminal audio libraries (speaker, node-speaker)
-- [ ] Optional audio enable/disable flag
-- [ ] Audio sync with emulation
+### Audio Output
+- [x] Audio via speaker package (44100 Hz)
+- [x] Optional audio disable (--no-audio flag)
+- [x] Audio sync with emulation (cycle-based sampling)
 
 ---
 
@@ -104,15 +102,24 @@ The NES controller uses a 4021 shift register that captures the state of all 8 b
 - [x] Simultaneous multi-button input
 - [x] Per-frame state polling accuracy (InputManager.update() called each frame)
 
-### Controller
+### Keyboard Input
 - [x] Basic keyboard input
 - [x] D-pad mapping (WASD + arrows)
 - [x] A/B button mapping
 - [x] Start/Select mapping
 - [x] Proper key-down/key-up handling (Kitty keyboard protocol)
 - [x] Simultaneous button press support
-- [ ] Controller 2 support
+- [x] Controller 1 keyboard support
+- [ ] Controller 2 keyboard support
 - [ ] Configurable key bindings (config file)
+
+### Gamepad Support
+- [x] HID gamepad support via node-hid
+- [x] Controller profiles (Xbox, PlayStation, Nintendo, 8BitDo)
+- [x] Hotplug detection (3-second polling)
+- [x] Controller 1 gamepad support
+- [x] Controller 2 gamepad support
+- [x] --list-gamepads and --debug-gamepad options
 
 ### Advanced Input
 - [ ] Turbo A/B buttons
@@ -123,15 +130,26 @@ The NES controller uses a 4021 shift register that captures the state of all 8 b
 
 ## Milestone 5: Rendering & Display
 
-### Terminal Renderer
+### Kitty Graphics Renderer
+- [x] Kitty graphics protocol support
+- [x] Auto-scale to fit terminal
+- [x] Aspect ratio correction (4:3)
+- [x] Diff-based updates
+- [x] Dynamic terminal resize detection
+
+### Terminal Renderer (Half-blocks)
 - [x] Unicode half-block characters (▀)
 - [x] True color (24-bit) support
-- [x] ANSI 256-color fallback
-- [x] ASCII grayscale mode
-- [x] Configurable resolution
+- [x] Aspect ratio correction (4:3)
+- [x] Dynamic terminal resize detection
+- [ ] ANSI 256-color fallback
 - [ ] Diff-based rendering (only update changed characters)
-- [ ] Double buffering optimization
-- [ ] Aspect ratio correction
+
+### ASCII Renderer
+- [x] ASCII grayscale mode
+- [x] Optional color support
+- [x] Configurable resolution
+- [x] Dynamic terminal resize detection
 
 ### Display Features
 - [ ] Configurable palette (different NES palettes)
@@ -218,7 +236,7 @@ The NES controller uses a 4021 shift register that captures the state of all 8 b
 
 - [x] ~~Sprites not rendering (not implemented)~~ - FIXED
 - [ ] Some games may have graphical glitches (timing)
-- [ ] No audio output
+- [x] ~~No audio output~~ - FIXED (APU fully implemented)
 - [x] ~~Key input uses timeout-based release~~ - FIXED (now uses Kitty keyboard protocol)
 
 ---
