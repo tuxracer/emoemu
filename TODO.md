@@ -161,25 +161,45 @@ The NES controller uses a 4021 shift register that captures the state of all 8 b
 
 ## Milestone 6: Performance & Optimization
 
-### CPU Performance
-- [ ] Optimize opcode dispatch (switch vs lookup table)
-- [ ] Reduce function call overhead
-- [ ] Profile hot paths
+### Quick Wins (Low Effort, High Impact)
+- [x] Reuse Kitty RGB buffer (`ppu/kitty-renderer.ts:109`)
+  - Currently allocates 184KB every frame (11MB/sec GC pressure)
+  - Move `new Uint8Array()` to class property, reuse across frames
+- [ ] Audio buffer pool (`emulator.ts:370`)
+  - New buffer allocated per sample batch (~11×/frame)
+  - Use 2-3 pre-allocated buffers and rotate
+- [ ] Palette color escape sequence cache (`ppu/palette.ts` + `ppu/renderer.ts`)
+  - ANSI escape sequences generated per-pixel (61,440×/frame)
+  - Pre-compute lookup table of 64 formatted strings at init
 
-### PPU Performance
-- [ ] Batch tile fetches
-- [ ] Cache pattern table lookups
-- [ ] Minimize per-pixel calculations
+### Medium Effort Optimizations
+- [ ] Memory bus dispatch table (`memory/bus.ts:47-103`)
+  - Sequential if-else checks on every memory access (millions/frame)
+  - Use page lookup table: `handlers[address >> 8](address)` for O(1) dispatch
+- [ ] String concatenation in renderer (`ppu/renderer.ts:36-104`)
+  - Uses `+=` in hot loop (7,680 concatenations/frame)
+  - Switch to array + `.join('')`
+- [ ] Sprite bit reversal lookup table (`ppu/ppu.ts:365-452`)
+  - `reverseBits()` called up to 8× per scanline with 6 bit ops each
+  - Pre-compute 256-entry lookup table
+- [ ] Reusable DMA temp buffer (`memory/bus.ts:112`)
+  - 256-byte allocation per OAM DMA
+  - Use reusable class-level buffer
 
-### Rendering Performance
-- [ ] Profile terminal write overhead
+### Larger Refactors (Highest Impact)
+- [ ] PPU tile data caching (`ppu/ppu.ts:464-596`)
+  - `renderPixel()` does 4-6 PPU reads per pixel (61,440×/frame)
+  - Cache tile pattern data at start of each 8-pixel tile span
+  - Pre-compute attribute shifts per tile instead of per pixel
+- [ ] ASCII luminance lookup table (`ppu/renderer.ts:108-110`)
+  - Luminance calculated per pixel in ASCII mode
+  - Pre-compute for all 64 palette colors at init
+
+### General
+- [ ] Profile hot paths with Node.js inspector
 - [ ] Implement frame skipping option
-- [ ] Reduce string allocations
-
-### Timing
 - [ ] Accurate frame timing (60 FPS)
 - [ ] Handle Node.js event loop delays
-- [ ] CPU/PPU cycle synchronization accuracy
 
 ---
 

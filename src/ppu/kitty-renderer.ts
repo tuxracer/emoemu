@@ -26,6 +26,8 @@ export class KittyRenderer {
   private autoScale: boolean;
   private displayCols: number;
   private displayRows: number;
+  // Pre-allocated RGB buffer to avoid 184KB allocation per frame
+  private rgbBuffer: Uint8Array = new Uint8Array(NES_WIDTH * NES_HEIGHT * 3);
 
   constructor(options: KittyRendererOptions = {}) {
     this.autoScale = options.scale === undefined;
@@ -105,19 +107,18 @@ export class KittyRenderer {
   }
 
   // Convert NES frame buffer to RGB data (native resolution - Kitty handles scaling)
+  // Uses pre-allocated buffer to avoid 184KB allocation per frame (~11MB/sec GC pressure)
   private frameToRgb(frameBuffer: Uint8Array): Uint8Array {
-    const rgb = new Uint8Array(NES_WIDTH * NES_HEIGHT * 3);
-
     for (let i = 0; i < NES_WIDTH * NES_HEIGHT; i++) {
       const nesColor = frameBuffer[i] & 0x3f;
       const [r, g, b] = nesPalette[nesColor];
       const dstIdx = i * 3;
-      rgb[dstIdx] = r;
-      rgb[dstIdx + 1] = g;
-      rgb[dstIdx + 2] = b;
+      this.rgbBuffer[dstIdx] = r;
+      this.rgbBuffer[dstIdx + 1] = g;
+      this.rgbBuffer[dstIdx + 2] = b;
     }
 
-    return rgb;
+    return this.rgbBuffer;
   }
 
   // Encode data to base64
