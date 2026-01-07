@@ -85,14 +85,24 @@ export function nesColorToHex(nesColor: number): string {
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
-// Get ANSI true color escape sequence
-export function nesColorToTrueColor(nesColor: number): string {
-  const [r, g, b] = nesPalette[nesColor & 0x3f];
-  return `\x1b[38;2;${r};${g};${b}m`;
+// Pre-computed ANSI escape sequence caches to avoid string generation per-pixel
+// These are computed once at module load, eliminating 61,440+ string allocations per frame
+const trueColorCache: string[] = new Array(64);
+const bgTrueColorCache: string[] = new Array(64);
+
+// Initialize caches
+for (let i = 0; i < 64; i++) {
+  const [r, g, b] = nesPalette[i];
+  trueColorCache[i] = `\x1b[38;2;${r};${g};${b}m`;
+  bgTrueColorCache[i] = `\x1b[48;2;${r};${g};${b}m`;
 }
 
-// Get ANSI true color background escape sequence
+// Get ANSI true color escape sequence (uses pre-computed cache)
+export function nesColorToTrueColor(nesColor: number): string {
+  return trueColorCache[nesColor & 0x3f];
+}
+
+// Get ANSI true color background escape sequence (uses pre-computed cache)
 export function nesColorToBgTrueColor(nesColor: number): string {
-  const [r, g, b] = nesPalette[nesColor & 0x3f];
-  return `\x1b[48;2;${r};${g};${b}m`;
+  return bgTrueColorCache[nesColor & 0x3f];
 }

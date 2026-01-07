@@ -168,7 +168,7 @@ The NES controller uses a 4021 shift register that captures the state of all 8 b
 - [x] Audio buffer pool (`emulator.ts:370`)
   - New buffer allocated per sample batch (~11×/frame)
   - Use 2-3 pre-allocated buffers and rotate
-- [ ] Palette color escape sequence cache (`ppu/palette.ts` + `ppu/renderer.ts`)
+- [x] Palette color escape sequence cache (`ppu/palette.ts` + `ppu/renderer.ts`)
   - ANSI escape sequences generated per-pixel (61,440×/frame)
   - Pre-compute lookup table of 64 formatted strings at init
 
