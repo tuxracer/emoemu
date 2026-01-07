@@ -165,7 +165,7 @@ The NES controller uses a 4021 shift register that captures the state of all 8 b
 - [x] Reuse Kitty RGB buffer (`ppu/kitty-renderer.ts:109`)
   - Currently allocates 184KB every frame (11MB/sec GC pressure)
   - Move `new Uint8Array()` to class property, reuse across frames
-- [ ] Audio buffer pool (`emulator.ts:370`)
+- [x] Audio buffer pool (`emulator.ts:370`)
   - New buffer allocated per sample batch (~11×/frame)
   - Use 2-3 pre-allocated buffers and rotate
 - [ ] Palette color escape sequence cache (`ppu/palette.ts` + `ppu/renderer.ts`)

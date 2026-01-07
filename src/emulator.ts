@@ -99,6 +99,11 @@ export class Emulator {
   private lastFrameTime: number = 0;
   private targetFrameTime: number = 1000 / 60; // ~16.67ms for 60 FPS
   private resizeHandler: (() => void) | null = null;
+  // Pre-allocated audio buffer pool to avoid allocation per sample batch
+  // Using 3 buffers to handle async speaker writes safely
+  private audioBufferPool: Buffer[] = [];
+  private audioBufferIndex: number = 0;
+  private static readonly AUDIO_BUFFER_COUNT = 3;
 
   constructor(options: EmulatorOptions) {
     // Initialize components
@@ -366,8 +371,17 @@ export class Emulator {
           samplesWritten = 0;
         }
 
-        // Allocate fresh buffer each time to avoid async corruption
-        const buffer = Buffer.alloc(samples.length * 2);
+        // Use pre-allocated buffer pool to avoid allocation per batch
+        // Rotate through buffers to handle async speaker writes safely
+        const requiredSize = samples.length * 2;
+        let buffer = this.audioBufferPool[this.audioBufferIndex];
+
+        // Lazily allocate buffers on first use or if size changed
+        if (!buffer || buffer.length < requiredSize) {
+          buffer = Buffer.alloc(requiredSize);
+          this.audioBufferPool[this.audioBufferIndex] = buffer;
+        }
+
         for (let i = 0; i < samples.length; i++) {
           const sample = Math.max(-1, Math.min(1, samples[i]));
           const int16 = (sample * 32767) | 0;
@@ -375,6 +389,9 @@ export class Emulator {
         }
         this.speaker.write(buffer);
         samplesWritten += samples.length;
+
+        // Rotate to next buffer in pool
+        this.audioBufferIndex = (this.audioBufferIndex + 1) % Emulator.AUDIO_BUFFER_COUNT;
       }
     };
   }
