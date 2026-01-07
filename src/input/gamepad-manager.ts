@@ -299,6 +299,14 @@ export class GamepadManager {
   }
 
   /**
+   * Get short status string for player 1's input device
+   */
+  getPlayer1Status(): string | null {
+    const p1 = this.gamepads.find((gp) => gp.controllerPort === 1);
+    return p1 ? p1.profile.name : null;
+  }
+
+  /**
    * List all detected gamepad devices (for diagnostics)
    */
   static listDevices(): Array<{

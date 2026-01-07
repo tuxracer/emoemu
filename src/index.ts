@@ -21,6 +21,7 @@ Options:
   --list-gamepads   List detected gamepad/controller devices and exit
   --no-gamepad      Disable gamepad support
   --no-audio        Disable audio output
+  --no-status       Hide the status bar
   --debug-gamepad   Show raw gamepad HID data (for debugging)
   --help            Show this help message
 
@@ -51,6 +52,7 @@ function parseArgs(args: string[]): {
   listGamepads: boolean;
   enableGamepad: boolean;
   enableAudio: boolean;
+  showStatusBar: boolean;
   debugGamepad: boolean;
 } {
   const result = {
@@ -64,6 +66,7 @@ function parseArgs(args: string[]): {
     listGamepads: false,
     enableGamepad: true,
     enableAudio: true,
+    showStatusBar: true,
     debugGamepad: false,
   };
 
@@ -92,6 +95,8 @@ function parseArgs(args: string[]): {
       result.enableGamepad = false;
     } else if (arg === '--no-audio') {
       result.enableAudio = false;
+    } else if (arg === '--no-status') {
+      result.showStatusBar = false;
     } else if (arg === '--debug-gamepad') {
       result.debugGamepad = true;
     } else if (!arg.startsWith('-')) {
@@ -302,6 +307,7 @@ async function main(): Promise<void> {
       scale: options.scale,
       enableGamepad: options.enableGamepad,
       enableAudio: options.enableAudio,
+      showStatusBar: options.showStatusBar,
     });
 
     await emulator.run();

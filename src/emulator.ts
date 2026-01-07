@@ -32,6 +32,7 @@ export interface EmulatorOptions {
   scale?: number;  // For Kitty renderer
   enableGamepad?: boolean;  // Enable gamepad/controller support
   enableAudio?: boolean;  // Enable audio output (default: true)
+  showStatusBar?: boolean;  // Show status bar (default: true)
 }
 
 // Calculate optimal dimensions for terminal/ASCII rendering
@@ -91,6 +92,7 @@ export class Emulator {
   private speaker: Speaker | null = null;
   private audioEnabled: boolean = true;
   private autoResize: boolean = false; // Whether to handle terminal resize events
+  private showStatusBar: boolean = true;
 
   private running: boolean = false;
   private frameCount: number = 0;
@@ -108,6 +110,7 @@ export class Emulator {
     this.controller2 = new Controller();
     this.apu = new APU();
     this.audioEnabled = options.enableAudio !== false;
+    this.showStatusBar = options.showStatusBar !== false;
 
     // Connect components
     this.bus.connectPPU(this.ppu);
@@ -297,11 +300,13 @@ export class Emulator {
         // Render to terminal (diff-based, includes cursor positioning)
         process.stdout.write(this.renderFrame());
 
-        // Calculate actual FPS and display on fixed status line
-        const fps = 1000 / elapsed;
-        const statusRow = this.renderer.getStatusRow();
-        process.stdout.write(this.renderer.moveCursorToRow(statusRow));
-        process.stdout.write(`FPS: ${fps.toFixed(1)}`);
+        // Display status bar if enabled
+        if (this.showStatusBar) {
+          const fps = 1000 / elapsed;
+          const statusRow = this.renderer.getStatusRow();
+          process.stdout.write(this.renderer.moveCursorToRow(statusRow));
+          process.stdout.write(this.buildStatusBar(fps));
+        }
 
         this.lastFrameTime = now;
       }
@@ -391,6 +396,31 @@ export class Emulator {
         this.stop();
       }
     });
+  }
+
+  private buildStatusBar(fps: number): string {
+    const parts: string[] = [];
+
+    // FPS
+    parts.push(`FPS: ${fps.toFixed(1)}`);
+
+    // Render mode
+    parts.push(`Render: ${this.renderMode}`);
+
+    // Audio status
+    parts.push(`Audio: ${this.audioEnabled ? 'on' : 'off'}`);
+
+    // Input mode - gamepad takes priority if connected
+    const gamepadStatus = this.gamepadManager?.getPlayer1Status();
+    const inputMode = gamepadStatus ?? (this.inputManager.isKittyMode() ? 'kitty' : 'legacy');
+    parts.push(`Input: ${inputMode}`);
+
+    // Current button presses
+    const buttons = this.controller1.getPressedButtons();
+    parts.push(`Buttons: ${buttons}`);
+
+    // Build the status line and clear to end of line
+    return parts.join(' | ') + '\x1b[K';
   }
 
   private cleanup(): void {
