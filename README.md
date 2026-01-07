@@ -13,7 +13,7 @@ A terminal-based NES emulator written in TypeScript. Play classic NES games dire
 
 ## 📋 Requirements
 
-- Node.js 18+
+- Node.js 24+
 - A terminal emulator:
   - ⭐ **Recommended**: [Ghostty](https://ghostty.org/) - best graphics and keyboard support
   - ✅ **Full support** (graphics + keyboard protocol): [Kitty](https://sw.kovidgoyal.net/kitty/), [WezTerm](https://wezfurlong.org/wezterm/)
