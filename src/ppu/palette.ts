@@ -106,3 +106,16 @@ export function nesColorToTrueColor(nesColor: number): string {
 export function nesColorToBgTrueColor(nesColor: number): string {
   return bgTrueColorCache[nesColor & 0x3f];
 }
+
+// Pre-computed luminance values for ASCII rendering
+// Eliminates per-pixel luminance calculation in ASCII mode
+const luminanceCache = new Float32Array(64);
+for (let i = 0; i < 64; i++) {
+  const [r, g, b] = nesPalette[i];
+  luminanceCache[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+// Get luminance of NES color (uses pre-computed cache)
+export function nesColorLuminance(nesColor: number): number {
+  return luminanceCache[nesColor & 0x3f];
+}

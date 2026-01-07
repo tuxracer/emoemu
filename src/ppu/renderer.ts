@@ -1,4 +1,4 @@
-import { nesPalette, nesColorToTrueColor, nesColorToBgTrueColor } from './palette.js';
+import { nesPalette, nesColorToTrueColor, nesColorToBgTrueColor, nesColorLuminance } from './palette.js';
 
 const RESET = '\x1b[0m';
 
@@ -33,6 +33,7 @@ export class TerminalRenderer {
   }
 
   // Render frame buffer to terminal string
+  // Uses array + join instead of string concatenation to reduce allocations
   render(frameBuffer: Uint8Array): string {
     const output: string[] = [];
 
@@ -45,7 +46,8 @@ export class TerminalRenderer {
       : 240 / (this.height * 2); // Terminal: half-blocks
 
     for (let charY = 0; charY < this.height; charY++) {
-      let line = '';
+      // Use array for line building to avoid O(n²) string concatenation
+      const lineChars: string[] = [];
 
       for (let charX = 0; charX < this.width; charX++) {
         const nesX = Math.floor(charX * scaleX);
@@ -54,16 +56,16 @@ export class TerminalRenderer {
           // ASCII mode: one character per pixel
           const nesY = Math.floor(charY * scaleY);
           const pixel = frameBuffer[nesY * 256 + nesX] & 0x3f;
-          const lum = this.luminance(pixel);
+          const lum = nesColorLuminance(pixel);
           const char = this.grayscaleChar(lum);
 
           if (this.useColor) {
             // Colored ASCII
             const fgColor = nesColorToTrueColor(pixel);
-            line += `${fgColor}${char}${RESET}`;
+            lineChars.push(fgColor, char, RESET);
           } else {
             // Pure ASCII grayscale
-            line += char;
+            lineChars.push(char);
           }
         } else {
           // Terminal mode: half-block characters
@@ -78,36 +80,30 @@ export class TerminalRenderer {
             if (this.useTrueColor) {
               const fgColor = nesColorToTrueColor(topPixel);
               const bgColor = nesColorToBgTrueColor(bottomPixel);
-              line += `${fgColor}${bgColor}\u2580${RESET}`;
+              lineChars.push(fgColor, bgColor, '\u2580', RESET);
             } else {
               // ANSI 256 color mode
               const [r1, g1, b1] = nesPalette[topPixel];
               const [r2, g2, b2] = nesPalette[bottomPixel];
               const fg = 16 + 36 * Math.round(r1 / 51) + 6 * Math.round(g1 / 51) + Math.round(b1 / 51);
               const bg = 16 + 36 * Math.round(r2 / 51) + 6 * Math.round(g2 / 51) + Math.round(b2 / 51);
-              line += `\x1b[38;5;${fg}m\x1b[48;5;${bg}m\u2580${RESET}`;
+              lineChars.push(`\x1b[38;5;${fg}m\x1b[48;5;${bg}m\u2580`, RESET);
             }
           } else {
             // Grayscale half-blocks (fallback)
-            const avgTop = this.luminance(topPixel);
-            const avgBottom = this.luminance(bottomPixel);
+            const avgTop = nesColorLuminance(topPixel);
+            const avgBottom = nesColorLuminance(bottomPixel);
             const avg = (avgTop + avgBottom) / 2;
-            line += this.grayscaleChar(avg);
+            lineChars.push(this.grayscaleChar(avg));
           }
         }
       }
 
-      output.push(line);
+      output.push(lineChars.join(''));
     }
 
     // Move cursor home and output frame
     return this.moveCursorHome() + output.join('\n');
-  }
-
-  // Calculate luminance of NES color
-  private luminance(nesColor: number): number {
-    const [r, g, b] = nesPalette[nesColor & 0x3f];
-    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   }
 
   // Convert luminance to ASCII character
