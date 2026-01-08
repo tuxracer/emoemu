@@ -8,11 +8,26 @@ export interface RendererOptions {
   useColor: boolean;
   useTrueColor: boolean;
   asciiMode: boolean;
+  emojiMode: boolean;
 }
 
 // ASCII character ramps for different density levels
 const ASCII_CHARS_DENSE = ' .\'`^",:;Il!i><~+_-][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$';
 const ASCII_CHARS_SIMPLE = ' .-:=+*#%@';
+
+// Emoji ramp from dark to light (each emoji is 2 terminal columns wide)
+// Includes all colored squares and circles, ordered by perceived luminance
+const EMOJI_CHARS = [
+  '⬛', '⚫',           // black
+  '🟤', '🟫',           // brown
+  '🟣', '🟪',           // purple
+  '🔵', '🟦',           // blue
+  '🔴', '🟥',           // red
+  '🟢', '🟩',           // green
+  '🟠', '🟧',           // orange
+  '🟡', '🟨',           // yellow
+  '⚪', '⬜',           // white
+];
 
 export class TerminalRenderer {
   private width: number;
@@ -20,6 +35,7 @@ export class TerminalRenderer {
   private useColor: boolean;
   private useTrueColor: boolean;
   private asciiMode: boolean;
+  private emojiMode: boolean;
   private asciiChars: string;
   private offsetCol: number = 0;  // Horizontal offset for centering (0-based for padding)
   private offsetRow: number = 1;  // Vertical offset for centering (1-based for ANSI)
@@ -30,6 +46,7 @@ export class TerminalRenderer {
     this.useColor = options.useColor ?? true;
     this.useTrueColor = options.useTrueColor ?? true;
     this.asciiMode = options.asciiMode ?? false;
+    this.emojiMode = options.emojiMode ?? false;
     // Use dense character set for better detail in ASCII mode
     this.asciiChars = this.asciiMode ? ASCII_CHARS_DENSE : ASCII_CHARS_SIMPLE;
     // Calculate centering offsets
@@ -45,7 +62,9 @@ export class TerminalRenderer {
     const availableRows = termRows - 2;
 
     // Horizontal centering (0-based for padding)
-    this.offsetCol = Math.max(0, Math.floor((termCols - this.width) / 2));
+    // Emoji mode: each character is 2 terminal columns wide
+    const displayWidth = this.emojiMode ? this.width * 2 : this.width;
+    this.offsetCol = Math.max(0, Math.floor((termCols - displayWidth) / 2));
 
     // Vertical centering (1-based for ANSI escape sequences)
     this.offsetRow = Math.max(1, Math.floor((availableRows - this.height) / 2) + 1);
@@ -57,11 +76,11 @@ export class TerminalRenderer {
     const output: string[] = [];
 
     // NES resolution is 256x240
-    // For ASCII mode: 1 char = 1 pixel (no half-blocks)
+    // For ASCII/emoji mode: 1 char = 1 pixel (no half-blocks)
     // For terminal mode: half-block characters for 2 vertical pixels per character
     const scaleX = 256 / this.width;
-    const scaleY = this.asciiMode
-      ? 240 / this.height  // ASCII: 1 char = 1 pixel
+    const scaleY = (this.asciiMode || this.emojiMode)
+      ? 240 / this.height  // ASCII/emoji: 1 char = 1 pixel
       : 240 / (this.height * 2); // Terminal: half-blocks
 
     for (let charY = 0; charY < this.height; charY++) {
@@ -71,7 +90,14 @@ export class TerminalRenderer {
       for (let charX = 0; charX < this.width; charX++) {
         const nesX = Math.floor(charX * scaleX);
 
-        if (this.asciiMode) {
+        if (this.emojiMode) {
+          // Emoji mode: one emoji per pixel (emoji is 2 terminal columns wide)
+          const nesY = Math.floor(charY * scaleY);
+          const pixel = frameBuffer[nesY * 256 + nesX] & 0x3f;
+          const lum = nesColorLuminance(pixel);
+          const emoji = this.luminanceToEmoji(lum);
+          lineChars.push(emoji);
+        } else if (this.asciiMode) {
           // ASCII mode: one character per pixel
           const nesY = Math.floor(charY * scaleY);
           const pixel = frameBuffer[nesY * 256 + nesX] & 0x3f;
@@ -134,6 +160,12 @@ export class TerminalRenderer {
   private grayscaleChar(luminance: number): string {
     const index = Math.floor(luminance * (this.asciiChars.length - 1));
     return this.asciiChars[Math.min(index, this.asciiChars.length - 1)];
+  }
+
+  // Convert luminance to emoji
+  private luminanceToEmoji(luminance: number): string {
+    const index = Math.floor(luminance * (EMOJI_CHARS.length - 1));
+    return EMOJI_CHARS[Math.min(index, EMOJI_CHARS.length - 1)];
   }
 
   // Get ANSI escape sequence to move cursor to centered start position

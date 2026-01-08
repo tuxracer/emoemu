@@ -14,6 +14,7 @@ Options:
   --kitty           Use Kitty graphics protocol (default, best quality)
   --terminal        Use terminal character rendering (Unicode half-blocks)
   --ascii           Use colored ASCII character rendering
+  --emoji           Use emoji character rendering
   --no-color        Disable colors (use with --ascii or --terminal)
   --scale <n>       Scale factor for Kitty mode (default: auto-fit to terminal)
   --width <n>       Set display width in characters (terminal/ascii mode)
@@ -83,6 +84,8 @@ function parseArgs(args: string[]): {
       result.scale = parseInt(args[++i], 10);
     } else if (arg === '--ascii') {
       result.renderMode = 'ascii';
+    } else if (arg === '--emoji') {
+      result.renderMode = 'emoji';
     } else if (arg === '--no-color') {
       result.useColor = false;
     } else if (arg === '--kitty') {
@@ -281,6 +284,9 @@ async function main(): Promise<void> {
     } else {
       console.log('Scale: auto-fit to terminal');
     }
+  } else if (options.renderMode === 'emoji') {
+    console.log(`Display: ${displaySize.width}x${displaySize.height}${options.width === undefined ? ' (auto-fit)' : ''}`);
+    console.log('Mode: Emoji characters');
   } else if (options.renderMode === 'ascii') {
     console.log(`Display: ${displaySize.width}x${displaySize.height}${options.width === undefined ? ' (auto-fit)' : ''}`);
     console.log(`Mode: ASCII characters${options.useColor ? ' with color' : ' (grayscale)'}`);

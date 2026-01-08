@@ -10,7 +10,7 @@ import { KittyRenderer } from './ppu/kitty-renderer.js';
 import { APU } from './apu/apu.js';
 import Speaker from 'speaker';
 
-export type RenderMode = 'terminal' | 'kitty' | 'ascii';
+export type RenderMode = 'terminal' | 'kitty' | 'ascii' | 'emoji';
 
 // Common renderer interface
 interface Renderer {
@@ -35,8 +35,8 @@ export interface EmulatorOptions {
   showStatusBar?: boolean;  // Show status bar (default: true)
 }
 
-// Calculate optimal dimensions for terminal/ASCII rendering
-function calculateTerminalDimensions(asciiMode: boolean): { width: number; height: number } {
+// Calculate optimal dimensions for terminal/ASCII/emoji rendering
+function calculateTerminalDimensions(mode: 'terminal' | 'ascii' | 'emoji'): { width: number; height: number } {
   const termCols = process.stdout.columns || 80;
   const termRows = process.stdout.rows || 24;
 
@@ -47,8 +47,25 @@ function calculateTerminalDimensions(asciiMode: boolean): { width: number; heigh
   // Terminal cells are roughly 1:2 (width:height)
   // For terminal mode (half-blocks): each row = 2 NES pixels vertically
   // For ASCII mode: each row = 1 NES pixel
+  // For emoji mode: each emoji = 1 NES pixel, but 2 terminal columns wide
 
-  if (asciiMode) {
+  if (mode === 'emoji') {
+    // Emoji: 1 emoji = 1 pixel, each emoji is 2 terminal columns wide
+    // Emojis appear roughly square (2 cols × 1 row ≈ square due to cell aspect)
+    // For NES 256x240 with 8:7 PAR, display aspect ratio ≈ 1.219:1
+    // With square emojis: width / height = 1.219
+    // width = height * 256 * 8 / (240 * 7) = height * 2048/1680 ≈ height * 1.219
+    let height = availableRows;
+    let width = Math.floor(height * 2048 / 1680);
+    const displayCols = width * 2; // Actual terminal columns needed
+
+    if (displayCols > termCols) {
+      width = Math.floor(termCols / 2);
+      height = Math.floor(width * 1680 / 2048);
+    }
+
+    return { width, height };
+  } else if (mode === 'ascii') {
     // ASCII: 1 char = 1 pixel
     // Maintain ~4:3 display aspect ratio accounting for cell aspect
     // cols / (rows * 2) = 4/3 => cols = rows * 8/3
@@ -142,12 +159,25 @@ export class Emulator {
       });
       // Enable auto-resize when no explicit scale is provided
       this.autoResize = options.scale === undefined;
+    } else if (this.renderMode === 'emoji') {
+      // Auto-size to terminal if no explicit dimensions given
+      const explicitDims = options.width && options.height;
+      const dims = explicitDims
+        ? { width: options.width!, height: options.height! }
+        : calculateTerminalDimensions('emoji');
+      this.autoResize = !explicitDims;
+      this.renderer = new TerminalRenderer({
+        width: dims.width,
+        height: dims.height,
+        useColor: false,
+        emojiMode: true,
+      });
     } else if (this.renderMode === 'ascii') {
       // Auto-size to terminal if no explicit dimensions given
       const explicitDims = options.width && options.height;
       const dims = explicitDims
         ? { width: options.width!, height: options.height! }
-        : calculateTerminalDimensions(true);
+        : calculateTerminalDimensions('ascii');
       this.autoResize = !explicitDims;
       this.renderer = new TerminalRenderer({
         width: dims.width,
@@ -160,7 +190,7 @@ export class Emulator {
       const explicitDims = options.width && options.height;
       const dims = explicitDims
         ? { width: options.width!, height: options.height! }
-        : calculateTerminalDimensions(false);
+        : calculateTerminalDimensions('terminal');
       this.autoResize = !explicitDims;
       this.renderer = new TerminalRenderer({
         width: dims.width,
@@ -270,8 +300,8 @@ export class Emulator {
           // Kitty renderer recalculates display size internally
           (this.renderer as KittyRenderer).setDimensions();
         } else {
-          const isAscii = this.renderMode === 'ascii';
-          const dims = calculateTerminalDimensions(isAscii);
+          const mode = this.renderMode === 'emoji' ? 'emoji' : this.renderMode === 'ascii' ? 'ascii' : 'terminal';
+          const dims = calculateTerminalDimensions(mode);
           (this.renderer as TerminalRenderer).setDimensions(dims.width, dims.height);
         }
         process.stdout.write(this.renderer.clearScreen());
@@ -419,9 +449,9 @@ export class Emulator {
     });
   }
 
-  // Cycle through render modes: kitty -> terminal -> ascii -> kitty
+  // Cycle through render modes: kitty -> terminal -> ascii -> emoji -> kitty
   private cycleRenderMode(): void {
-    const modes: RenderMode[] = ['kitty', 'terminal', 'ascii'];
+    const modes: RenderMode[] = ['kitty', 'terminal', 'ascii', 'emoji'];
     const currentIndex = modes.indexOf(this.renderMode);
     const nextIndex = (currentIndex + 1) % modes.length;
     const nextMode = modes[nextIndex];
@@ -430,8 +460,17 @@ export class Emulator {
     if (nextMode === 'kitty') {
       this.renderer = new KittyRenderer();
       this.autoResize = true;
+    } else if (nextMode === 'emoji') {
+      const dims = calculateTerminalDimensions('emoji');
+      this.renderer = new TerminalRenderer({
+        width: dims.width,
+        height: dims.height,
+        useColor: false,
+        emojiMode: true,
+      });
+      this.autoResize = true;
     } else if (nextMode === 'ascii') {
-      const dims = calculateTerminalDimensions(true);
+      const dims = calculateTerminalDimensions('ascii');
       this.renderer = new TerminalRenderer({
         width: dims.width,
         height: dims.height,
@@ -440,7 +479,7 @@ export class Emulator {
       });
       this.autoResize = true;
     } else {
-      const dims = calculateTerminalDimensions(false);
+      const dims = calculateTerminalDimensions('terminal');
       this.renderer = new TerminalRenderer({
         width: dims.width,
         height: dims.height,
