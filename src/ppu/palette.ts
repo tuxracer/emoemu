@@ -120,18 +120,17 @@ export function nesColorLuminance(nesColor: number): number {
   return luminanceCache[nesColor & 0x3f];
 }
 
-// Emoji color families with square (brighter) and circle (darker) variants
-// RGB values tuned for NES palette matching
-const EMOJI_FAMILIES: { square: string; circle: string; rgb: [number, number, number]; threshold: number }[] = [
-  { square: '⬜', circle: '⚪', rgb: [255, 255, 255], threshold: 0.85 },  // White
-  { square: '🟨', circle: '🟡', rgb: [250, 220, 80], threshold: 0.65 },   // Yellow
-  { square: '🟧', circle: '🟠', rgb: [240, 140, 20], threshold: 0.50 },   // Orange
-  { square: '🟥', circle: '🔴', rgb: [220, 40, 40], threshold: 0.40 },    // Red
-  { square: '🟫', circle: '🟤', rgb: [130, 80, 30], threshold: 0.30 },    // Brown
-  { square: '🟩', circle: '🟢', rgb: [50, 160, 30], threshold: 0.45 },    // Green - low B to avoid cyan
-  { square: '🟦', circle: '🔵', rgb: [50, 120, 220], threshold: 0.45 },   // Blue - low R, medium G
-  { square: '🟪', circle: '🟣', rgb: [160, 70, 200], threshold: 0.40 },   // Purple - high R, low G
-  { square: '⬛', circle: '⚫', rgb: [0, 0, 0], threshold: 0.15 },         // Black
+// Emoji colors with RGB values tuned for NES palette matching
+const EMOJI_COLORS: { emoji: string; rgb: [number, number, number] }[] = [
+  { emoji: '⬜', rgb: [255, 255, 255] },     // White
+  { emoji: '🟨', rgb: [250, 220, 80] },      // Yellow
+  { emoji: '🟧', rgb: [240, 140, 20] },      // Orange
+  { emoji: '🟥', rgb: [220, 40, 40] },       // Red
+  { emoji: '🟫', rgb: [130, 80, 30] },       // Brown
+  { emoji: '🟩', rgb: [50, 160, 30] },       // Green - low B to avoid cyan
+  { emoji: '🟦', rgb: [50, 120, 220] },      // Blue - low R, medium G
+  { emoji: '🟪', rgb: [160, 70, 200] },      // Purple - high R, low G
+  { emoji: '⬛', rgb: [0, 0, 0] },           // Black
 ];
 
 // Calculate squared RGB distance (no sqrt needed for comparison)
@@ -147,26 +146,23 @@ function colorDistanceSquared(
 }
 
 // Pre-computed emoji lookup table: NES color index → closest emoji
-// Uses square for brighter shades, circle for darker shades of each color
 const emojiColorCache: string[] = new Array(64);
 
 // Initialize emoji color cache
 for (let i = 0; i < 64; i++) {
   const [r, g, b] = nesPalette[i];
-  const lum = luminanceCache[i];
-  let bestFamily = EMOJI_FAMILIES[0];
+  let bestEmoji = EMOJI_COLORS[0].emoji;
   let bestDistance = Infinity;
 
-  for (const family of EMOJI_FAMILIES) {
-    const dist = colorDistanceSquared(r, g, b, family.rgb[0], family.rgb[1], family.rgb[2]);
+  for (const { emoji, rgb } of EMOJI_COLORS) {
+    const dist = colorDistanceSquared(r, g, b, rgb[0], rgb[1], rgb[2]);
     if (dist < bestDistance) {
       bestDistance = dist;
-      bestFamily = family;
+      bestEmoji = emoji;
     }
   }
 
-  // Use square for brighter colors, circle for darker colors within the family
-  emojiColorCache[i] = lum >= bestFamily.threshold ? bestFamily.square : bestFamily.circle;
+  emojiColorCache[i] = bestEmoji;
 }
 
 // Get closest color-matched emoji for NES color (uses pre-computed cache)
