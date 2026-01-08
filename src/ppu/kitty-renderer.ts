@@ -11,8 +11,8 @@ const ST = `${ESC}\\`;   // String Terminator
 const NES_WIDTH = 256;
 const NES_HEIGHT = 240;
 
-// NES aspect ratio (256:240 = 16:15, but displayed on 4:3 TV)
-// Terminal cells are roughly 1:2 (width:height), so we need to account for that
+// NES native resolution 256x240 with 8:7 pixel aspect ratio (PAR)
+// Display aspect ratio ≈ 1.219:1 when PAR-corrected
 
 export interface KittyRendererOptions {
   scale?: number;  // Scale factor for the image (undefined = auto-fit to terminal)
@@ -75,23 +75,22 @@ export class KittyRenderer {
     const availableRows = termRows - 2;
     const availableCols = termCols;
 
-    // NES was displayed on 4:3 TVs
+    // NES native resolution is 256x240 with 8:7 pixel aspect ratio (PAR)
+    // This means each NES pixel is displayed 8/7 times as wide as it is tall
+    // Display aspect ratio (DAR) = (256 * 8/7) / 240 = 2048/1680 ≈ 1.219:1
     // Terminal cells are ~1:2 (half as wide as tall)
-    // For 4:3 aspect ratio: visual_width / visual_height = 4/3
-    // cols * cell_width / (rows * cell_height) = 4/3
-    // Since cell_height ≈ 2 * cell_width:
-    // cols / (rows * 2) = 4/3
-    // cols = rows * 8/3 ≈ rows * 2.667
+    // For 1.219 DAR: cols / (rows * 2) = 1.219
+    // cols = rows * 256/105 ≈ rows * 2.438
 
     // Try to fill height first
     let displayRows = availableRows;
-    let displayCols = Math.floor(displayRows * 8 / 3);
+    let displayCols = Math.floor(displayRows * 256 / 105);
 
     // If too wide, constrain by width instead
     if (displayCols > availableCols) {
       displayCols = availableCols;
-      // cols = rows * 8/3, so rows = cols * 3/8
-      displayRows = Math.floor(displayCols * 3 / 8);
+      // cols = rows * 256/105, so rows = cols * 105/256
+      displayRows = Math.floor(displayCols * 105 / 256);
     }
 
     // Ensure minimum size
