@@ -81,6 +81,12 @@ const KITTY_DETECT_TIMEOUT = 100;
 // Time in ms before auto-releasing keys in legacy mode
 const LEGACY_KEY_RELEASE_TIME = 80;
 
+// Result of processing input
+export interface InputResult {
+  quit: boolean;
+  cycleRenderMode: boolean;
+}
+
 /**
  * InputManager with Kitty keyboard protocol detection.
  * Uses true keydown/keyup events in Kitty mode.
@@ -89,6 +95,7 @@ const LEGACY_KEY_RELEASE_TIME = 80;
 export class InputManager {
   private controller1: Controller;
   private quitRequested: boolean = false;
+  private cycleRenderModeRequested: boolean = false;
 
   // Track currently pressed keys (keycode -> button)
   private pressedKeys: Map<number, Button> = new Map();
@@ -213,7 +220,10 @@ export class InputManager {
    * Process raw input from stdin.
    * Handles both Kitty protocol and legacy input.
    */
-  processInput(input: string): { quit: boolean } {
+  processInput(input: string): InputResult {
+    // Reset per-frame flags
+    this.cycleRenderModeRequested = false;
+
     if (this.kittyMode) {
       return this.processKittyInput(input);
     } else {
@@ -224,7 +234,7 @@ export class InputManager {
   /**
    * Process input in Kitty protocol mode.
    */
-  private processKittyInput(input: string): { quit: boolean } {
+  private processKittyInput(input: string): InputResult {
     this.inputBuffer += input;
 
     // Process all complete sequences in the buffer
@@ -233,7 +243,7 @@ export class InputManager {
       if (this.inputBuffer[0] === '\u0003') {
         this.quitRequested = true;
         this.inputBuffer = this.inputBuffer.slice(1);
-        return { quit: true };
+        return { quit: true, cycleRenderMode: false };
       }
 
       // Check for escape sequences
@@ -284,7 +294,7 @@ export class InputManager {
         if (this.inputBuffer.length === 1 || !this.inputBuffer[1]?.match(/[\[\]O]/)) {
           this.quitRequested = true;
           this.inputBuffer = this.inputBuffer.slice(1);
-          return { quit: true };
+          return { quit: true, cycleRenderMode: false };
         }
 
         // Unknown escape sequence - wait for more data or skip
@@ -300,29 +310,35 @@ export class InputManager {
       const charCode = char.charCodeAt(0);
       this.inputBuffer = this.inputBuffer.slice(1);
 
+      // Check for render mode toggle (R/r key)
+      if (charCode === 114 || charCode === 82) { // 'r' or 'R'
+        this.cycleRenderModeRequested = true;
+        continue;
+      }
+
       const button = KITTY_KEY_TO_BUTTON.get(charCode);
       if (button !== undefined) {
         this.handleKeyDown(charCode, button);
       }
     }
 
-    return { quit: false };
+    return { quit: false, cycleRenderMode: this.cycleRenderModeRequested };
   }
 
   /**
    * Process input in legacy mode (non-Kitty terminals).
    */
-  private processLegacyInput(input: string): { quit: boolean } {
+  private processLegacyInput(input: string): InputResult {
     // Check for Ctrl+C
     if (input === '\u0003') {
       this.quitRequested = true;
-      return { quit: true };
+      return { quit: true, cycleRenderMode: false };
     }
 
     // Check for Escape
     if (input === '\x1b') {
       this.quitRequested = true;
-      return { quit: true };
+      return { quit: true, cycleRenderMode: false };
     }
 
     // Try to match arrow keys first
@@ -336,7 +352,7 @@ export class InputManager {
       if (input.length > 3) {
         return this.processLegacyInput(input.slice(3));
       }
-      return { quit: false };
+      return { quit: false, cycleRenderMode: this.cycleRenderModeRequested };
     }
 
     // Process each character
@@ -344,7 +360,13 @@ export class InputManager {
       if (char === '\x1b') {
         // Standalone escape - quit
         this.quitRequested = true;
-        return { quit: true };
+        return { quit: true, cycleRenderMode: false };
+      }
+
+      // Check for render mode toggle (R/r key)
+      if (char === 'r' || char === 'R') {
+        this.cycleRenderModeRequested = true;
+        continue;
       }
 
       const button = LEGACY_KEY_TO_BUTTON.get(char);
@@ -353,7 +375,7 @@ export class InputManager {
       }
     }
 
-    return { quit: false };
+    return { quit: false, cycleRenderMode: this.cycleRenderModeRequested };
   }
 
   /**
@@ -400,6 +422,12 @@ export class InputManager {
   private handleKittyKey(keycode: number, eventType: number): void {
     if (keycode === 27) {
       this.quitRequested = true;
+      return;
+    }
+
+    // Check for render mode toggle (R/r key) - only on key press, not release
+    if ((keycode === 114 || keycode === 82) && (eventType === 1 || eventType === 2)) {
+      this.cycleRenderModeRequested = true;
       return;
     }
 

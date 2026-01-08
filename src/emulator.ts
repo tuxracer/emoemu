@@ -412,7 +412,47 @@ export class Emulator {
       if (result.quit) {
         this.stop();
       }
+
+      if (result.cycleRenderMode) {
+        this.cycleRenderMode();
+      }
     });
+  }
+
+  // Cycle through render modes: kitty -> terminal -> ascii -> kitty
+  private cycleRenderMode(): void {
+    const modes: RenderMode[] = ['kitty', 'terminal', 'ascii'];
+    const currentIndex = modes.indexOf(this.renderMode);
+    const nextIndex = (currentIndex + 1) % modes.length;
+    const nextMode = modes[nextIndex];
+
+    // Create new renderer based on mode
+    if (nextMode === 'kitty') {
+      this.renderer = new KittyRenderer();
+      this.autoResize = true;
+    } else if (nextMode === 'ascii') {
+      const dims = calculateTerminalDimensions(true);
+      this.renderer = new TerminalRenderer({
+        width: dims.width,
+        height: dims.height,
+        useColor: true,
+        asciiMode: true,
+      });
+      this.autoResize = true;
+    } else {
+      const dims = calculateTerminalDimensions(false);
+      this.renderer = new TerminalRenderer({
+        width: dims.width,
+        height: dims.height,
+        useColor: true,
+      });
+      this.autoResize = true;
+    }
+
+    this.renderMode = nextMode;
+
+    // Clear screen for new renderer
+    process.stdout.write(this.renderer.clearScreen());
   }
 
   private buildStatusBar(fps: number): string {
@@ -421,8 +461,8 @@ export class Emulator {
     // FPS
     parts.push(`FPS: ${fps.toFixed(1)}`);
 
-    // Render mode
-    parts.push(`Render: ${this.renderMode}`);
+    // Render mode (with shortcut hint)
+    parts.push(`Render: ${this.renderMode} [R]`);
 
     // Audio status
     parts.push(`Audio: ${this.audioEnabled ? 'on' : 'off'}`);
