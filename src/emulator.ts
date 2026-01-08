@@ -520,6 +520,9 @@ export class Emulator {
   }
 
   private cleanup(): void {
+    // Save battery-backed RAM if the cartridge supports it
+    this.cartridge.saveSram();
+
     // Remove resize handler
     if (this.resizeHandler) {
       process.stdout.off('resize', this.resizeHandler);
