@@ -1,4 +1,4 @@
-import { nesPalette } from './palette.js';
+import { nesPaletteFlat } from './palette.js';
 
 // Kitty graphics protocol renderer
 // https://sw.kovidgoyal.net/kitty/graphics-protocol/
@@ -29,6 +29,9 @@ export class KittyRenderer {
   private offsetRow: number = 1;  // Vertical offset for centering
   // Pre-allocated RGB buffer to avoid 184KB allocation per frame
   private rgbBuffer: Uint8Array = new Uint8Array(NES_WIDTH * NES_HEIGHT * 3);
+  // Pre-allocated Buffer for base64 encoding to avoid ~245KB allocation per frame
+  // (RGB buffer wrapped in a Buffer that shares the same memory)
+  private base64Buffer: Buffer = Buffer.from(this.rgbBuffer.buffer);
 
   constructor(options: KittyRendererOptions = {}) {
     this.autoScale = options.scale === undefined;
@@ -133,28 +136,30 @@ export class KittyRenderer {
   }
 
   // Convert NES frame buffer to RGB data (native resolution - Kitty handles scaling)
-  // Uses pre-allocated buffer to avoid 184KB allocation per frame (~11MB/sec GC pressure)
-  private frameToRgb(frameBuffer: Uint8Array): Uint8Array {
-    for (let i = 0; i < NES_WIDTH * NES_HEIGHT; i++) {
-      const nesColor = frameBuffer[i] & 0x3f;
-      const [r, g, b] = nesPalette[nesColor];
-      const dstIdx = i * 3;
-      this.rgbBuffer[dstIdx] = r;
-      this.rgbBuffer[dstIdx + 1] = g;
-      this.rgbBuffer[dstIdx + 2] = b;
-    }
+  // Uses pre-allocated buffer and flat palette for maximum performance
+  // Eliminates: 184KB RGB allocation + 61K tuple destructures per frame
+  private frameToRgb(frameBuffer: Uint8Array): void {
+    const rgb = this.rgbBuffer;
+    const palette = nesPaletteFlat;
+    const pixelCount = NES_WIDTH * NES_HEIGHT;
 
-    return this.rgbBuffer;
+    for (let i = 0; i < pixelCount; i++) {
+      const paletteIdx = (frameBuffer[i] & 0x3f) * 3;
+      const dstIdx = i * 3;
+      rgb[dstIdx] = palette[paletteIdx];
+      rgb[dstIdx + 1] = palette[paletteIdx + 1];
+      rgb[dstIdx + 2] = palette[paletteIdx + 2];
+    }
   }
 
-  // Encode data to base64
-  private toBase64(data: Uint8Array): string {
-    return Buffer.from(data).toString('base64');
+  // Encode RGB buffer to base64 using pre-allocated Buffer (zero-copy)
+  private toBase64(): string {
+    return this.base64Buffer.toString('base64');
   }
 
   // Send image using Kitty graphics protocol with chunked transmission
-  private sendImage(rgb: Uint8Array, width: number, height: number): string {
-    const base64 = this.toBase64(rgb);
+  private sendImage(width: number, height: number): string {
+    const base64 = this.toBase64();
     const chunks: string[] = [];
 
     // Kitty recommends chunks of 4096 bytes
@@ -217,8 +222,8 @@ export class KittyRenderer {
 
   // Render frame buffer to Kitty graphics
   render(frameBuffer: Uint8Array): string {
-    // Convert frame to RGB at native resolution - Kitty handles scaling
-    const rgb = this.frameToRgb(frameBuffer);
+    // Convert frame to RGB at native resolution (writes to pre-allocated rgbBuffer)
+    this.frameToRgb(frameBuffer);
 
     // Build output
     let output = '';
@@ -227,7 +232,7 @@ export class KittyRenderer {
     output += `${ESC}[${this.offsetRow};${this.offsetCol}H`;
 
     // Send native resolution image - Kitty will scale it
-    output += this.sendImage(rgb, NES_WIDTH, NES_HEIGHT);
+    output += this.sendImage(NES_WIDTH, NES_HEIGHT);
 
     return output;
   }

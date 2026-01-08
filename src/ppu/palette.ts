@@ -67,6 +67,16 @@ export const nesPalette: [number, number, number][] = [
   [0, 0, 0],       // 0x3F
 ];
 
+// Flat palette for high-performance RGB lookup (eliminates tuple destructuring)
+// Access: nesPaletteFlat[colorIndex * 3] = R, [colorIndex * 3 + 1] = G, [colorIndex * 3 + 2] = B
+export const nesPaletteFlat = new Uint8Array(64 * 3);
+for (let i = 0; i < 64; i++) {
+  const [r, g, b] = nesPalette[i];
+  nesPaletteFlat[i * 3] = r;
+  nesPaletteFlat[i * 3 + 1] = g;
+  nesPaletteFlat[i * 3 + 2] = b;
+}
+
 // Convert NES palette index to ANSI 256-color code
 export function nesColorToAnsi256(nesColor: number): number {
   const [r, g, b] = nesPalette[nesColor & 0x3f];
