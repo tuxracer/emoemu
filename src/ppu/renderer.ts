@@ -11,7 +11,7 @@ export interface RendererOptions {
 }
 
 // ASCII character ramps for different density levels
-const ASCII_CHARS_DENSE = ' .\'`^",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$';
+const ASCII_CHARS_DENSE = ' .\'`^",:;Il!i><~+_-][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$';
 const ASCII_CHARS_SIMPLE = ' .-:=+*#%@';
 
 export class TerminalRenderer {
