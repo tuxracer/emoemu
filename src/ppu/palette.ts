@@ -119,3 +119,63 @@ for (let i = 0; i < 64; i++) {
 export function nesColorLuminance(nesColor: number): number {
   return luminanceCache[nesColor & 0x3f];
 }
+
+// Emoji color definitions with RGB values tuned for NES palette matching
+// Blues have low R + high G, purples have high R + low G
+const EMOJI_COLORS: { emoji: string; rgb: [number, number, number] }[] = [
+  { emoji: '⬛', rgb: [0, 0, 0] },           // Black square
+  { emoji: '⚫', rgb: [0, 0, 0] },           // Black circle
+  { emoji: '🟫', rgb: [130, 80, 30] },       // Brown square
+  { emoji: '🟤', rgb: [130, 80, 30] },       // Brown circle
+  { emoji: '🟥', rgb: [220, 40, 40] },       // Red square
+  { emoji: '🔴', rgb: [220, 40, 40] },       // Red circle
+  { emoji: '🟧', rgb: [240, 140, 20] },      // Orange square
+  { emoji: '🟠', rgb: [240, 140, 20] },      // Orange circle
+  { emoji: '🟨', rgb: [250, 220, 80] },      // Yellow square
+  { emoji: '🟡', rgb: [250, 220, 80] },      // Yellow circle
+  { emoji: '🟩', rgb: [50, 160, 30] },       // Green square - low B to avoid cyan
+  { emoji: '🟢', rgb: [50, 160, 30] },       // Green circle
+  { emoji: '🟦', rgb: [50, 120, 220] },      // Blue square - low R, medium G
+  { emoji: '🔵', rgb: [50, 120, 220] },      // Blue circle
+  { emoji: '🟪', rgb: [160, 70, 200] },      // Purple square - high R, low G
+  { emoji: '🟣', rgb: [160, 70, 200] },      // Purple circle
+  { emoji: '⬜', rgb: [255, 255, 255] },     // White square
+  { emoji: '⚪', rgb: [255, 255, 255] },     // White circle
+];
+
+// Calculate squared RGB distance (no sqrt needed for comparison)
+function colorDistanceSquared(
+  r1: number, g1: number, b1: number,
+  r2: number, g2: number, b2: number
+): number {
+  const dr = r1 - r2;
+  const dg = g1 - g2;
+  const db = b1 - b2;
+  // Weight green more heavily (human eye is more sensitive to green)
+  return dr * dr + dg * dg * 1.5 + db * db;
+}
+
+// Pre-computed emoji lookup table: NES color index → closest emoji
+const emojiColorCache: string[] = new Array(64);
+
+// Initialize emoji color cache
+for (let i = 0; i < 64; i++) {
+  const [r, g, b] = nesPalette[i];
+  let bestEmoji = EMOJI_COLORS[0].emoji;
+  let bestDistance = Infinity;
+
+  for (const { emoji, rgb } of EMOJI_COLORS) {
+    const dist = colorDistanceSquared(r, g, b, rgb[0], rgb[1], rgb[2]);
+    if (dist < bestDistance) {
+      bestDistance = dist;
+      bestEmoji = emoji;
+    }
+  }
+
+  emojiColorCache[i] = bestEmoji;
+}
+
+// Get closest color-matched emoji for NES color (uses pre-computed cache)
+export function nesColorToEmoji(nesColor: number): string {
+  return emojiColorCache[nesColor & 0x3f];
+}

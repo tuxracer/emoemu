@@ -1,4 +1,4 @@
-import { nesPalette, nesColorToTrueColor, nesColorToBgTrueColor, nesColorLuminance } from './palette.js';
+import { nesPalette, nesColorToTrueColor, nesColorToBgTrueColor, nesColorLuminance, nesColorToEmoji } from './palette.js';
 
 const RESET = '\x1b[0m';
 
@@ -14,20 +14,6 @@ export interface RendererOptions {
 // ASCII character ramps for different density levels
 const ASCII_CHARS_DENSE = ' .\'`^",:;Il!i><~+_-][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$';
 const ASCII_CHARS_SIMPLE = ' .-:=+*#%@';
-
-// Emoji ramp from dark to light (each emoji is 2 terminal columns wide)
-// Includes all colored squares and circles, ordered by perceived luminance
-const EMOJI_CHARS = [
-  '⬛', '⚫',           // black
-  '🟤', '🟫',           // brown
-  '🟣', '🟪',           // purple
-  '🔵', '🟦',           // blue
-  '🔴', '🟥',           // red
-  '🟢', '🟩',           // green
-  '🟠', '🟧',           // orange
-  '🟡', '🟨',           // yellow
-  '⚪', '⬜',           // white
-];
 
 export class TerminalRenderer {
   private width: number;
@@ -92,10 +78,10 @@ export class TerminalRenderer {
 
         if (this.emojiMode) {
           // Emoji mode: one emoji per pixel (emoji is 2 terminal columns wide)
+          // Uses color-matched emoji lookup for accurate color representation
           const nesY = Math.floor(charY * scaleY);
           const pixel = frameBuffer[nesY * 256 + nesX] & 0x3f;
-          const lum = nesColorLuminance(pixel);
-          const emoji = this.luminanceToEmoji(lum);
+          const emoji = nesColorToEmoji(pixel);
           lineChars.push(emoji);
         } else if (this.asciiMode) {
           // ASCII mode: one character per pixel
@@ -160,12 +146,6 @@ export class TerminalRenderer {
   private grayscaleChar(luminance: number): string {
     const index = Math.floor(luminance * (this.asciiChars.length - 1));
     return this.asciiChars[Math.min(index, this.asciiChars.length - 1)];
-  }
-
-  // Convert luminance to emoji
-  private luminanceToEmoji(luminance: number): string {
-    const index = Math.floor(luminance * (EMOJI_CHARS.length - 1));
-    return EMOJI_CHARS[Math.min(index, EMOJI_CHARS.length - 1)];
   }
 
   // Get ANSI escape sequence to move cursor to centered start position
