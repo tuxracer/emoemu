@@ -54,7 +54,7 @@ export class Controller {
 
   // Get string representation of pressed buttons for display
   getPressedButtons(): string {
-    const buttonNames = ['A', 'B', 'Sel', 'Sta', 'U', 'D', 'L', 'R'];
+    const buttonNames = ['A', 'B', 'Sel', 'Sta', '↑', '↓', '←', '→'];
     const pressed: string[] = [];
     for (let i = 0; i < 8; i++) {
       if (this.buttons[i]) {
