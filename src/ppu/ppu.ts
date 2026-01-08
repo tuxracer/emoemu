@@ -98,9 +98,12 @@ export class PPU {
   private sprites: SpriteData[] = [];
   private spriteZeroOnLine: boolean = false;
 
-  // Saved horizontal scroll at start of scanline (for correct tile fetching)
+  // Saved scroll values at start of scanline (for correct tile fetching)
   private scanlineStartCoarseX: number = 0;
   private scanlineStartNametable: number = 0;
+  private scanlineStartFineY: number = 0;
+  private scanlineStartCoarseY: number = 0;
+  private scanlineStartFineX: number = 0;
 
   // Tile cache for background rendering optimization
   // Caches tile data to avoid 4-6 PPU reads per pixel
@@ -144,6 +147,9 @@ export class PPU {
     this.spriteZeroOnLine = false;
     this.scanlineStartCoarseX = 0;
     this.scanlineStartNametable = 0;
+    this.scanlineStartFineY = 0;
+    this.scanlineStartCoarseY = 0;
+    this.scanlineStartFineX = 0;
     this.tileCacheX = -1;
   }
 
@@ -489,15 +495,17 @@ export class PPU {
       // Check if we should render background in left 8 pixels
       if (screenX >= 8 || (this.mask & MaskFlag.SHOW_LEFT_BG)) {
         // Calculate scrolled position: which pixel in the 512-pixel wide nametable space
-        const scrolledX = screenX + this.x;
+        // Use cached fine X to prevent mid-scanline scroll changes from affecting rendering
+        const scrolledX = screenX + this.scanlineStartFineX;
         const pixelInTile = scrolledX & 0x07;
         const tileOffset = scrolledX >> 3; // How many tiles from the starting tile
 
         // Check if we need to fetch new tile data (every 8 pixels or first pixel)
         if (this.tileCacheX !== tileOffset) {
-          // Get vertical scroll components from v (these don't change during scanline)
-          const fineY = (this.v >> 12) & 0x07;
-          const coarseY = (this.v >> 5) & 0x1f;
+          // Use vertical scroll components cached at scanline start
+          // This prevents mid-scanline scroll changes from affecting rendering
+          const fineY = this.scanlineStartFineY;
+          const coarseY = this.scanlineStartCoarseY;
 
           // Calculate the actual coarse X by adding tile offset to starting position
           // Handle wraparound and nametable switching
@@ -662,9 +670,14 @@ export class PPU {
     // v: ....A.. ...BCDEF <- t: ....A.. ...BCDEF
     this.v = (this.v & 0xfbe0) | (this.t & 0x041f);
 
-    // Save starting horizontal scroll for this scanline's rendering
+    // Save starting scroll values for this scanline's rendering
+    // Horizontal scroll is copied from t, vertical is already in v
+    // Fine X comes from the x register (set by first $2005 write)
     this.scanlineStartCoarseX = this.v & 0x001f;
     this.scanlineStartNametable = (this.v >> 10) & 0x03;
+    this.scanlineStartFineY = (this.v >> 12) & 0x07;
+    this.scanlineStartCoarseY = (this.v >> 5) & 0x1f;
+    this.scanlineStartFineX = this.x;
 
     // Invalidate tile cache for new scanline
     this.tileCacheX = -1;
