@@ -26,6 +26,8 @@ export class KittyRenderer {
   private autoScale: boolean;
   private displayCols: number;
   private displayRows: number;
+  private offsetCol: number = 1;  // Horizontal offset for centering
+  private offsetRow: number = 1;  // Vertical offset for centering
   // Pre-allocated RGB buffer to avoid 184KB allocation per frame
   private rgbBuffer: Uint8Array = new Uint8Array(NES_WIDTH * NES_HEIGHT * 3);
 
@@ -34,9 +36,11 @@ export class KittyRenderer {
 
     if (this.autoScale) {
       // Calculate display size in terminal cells
-      const { cols, rows } = this.calculateOptimalDisplaySize();
+      const { cols, rows, offsetCol, offsetRow } = this.calculateOptimalDisplaySize();
       this.displayCols = cols;
       this.displayRows = rows;
+      this.offsetCol = offsetCol;
+      this.offsetRow = offsetRow;
       this.scale = 2; // Use 2x for good image quality, Kitty will scale to display size
     } else {
       this.scale = options.scale!;
@@ -44,11 +48,27 @@ export class KittyRenderer {
       // Kitty will use its own cell size, we just need rough estimates for status row
       this.displayCols = 0; // 0 means let Kitty decide
       this.displayRows = 0;
+      // Calculate centering for fixed scale mode
+      this.calculateFixedScaleOffsets();
     }
   }
 
+  // Calculate centering offsets for fixed scale mode
+  private calculateFixedScaleOffsets(): void {
+    const termCols = process.stdout.columns || 80;
+    const termRows = process.stdout.rows || 24;
+    // Estimate ~10 pixels per column, ~20 pixels per row (typical terminal cell size)
+    const displayWidth = NES_WIDTH * this.scale;
+    const displayHeight = NES_HEIGHT * this.scale;
+    const cols = Math.ceil(displayWidth / 10);
+    const rows = Math.ceil(displayHeight / 20);
+
+    this.offsetCol = Math.max(1, Math.floor((termCols - cols) / 2) + 1);
+    this.offsetRow = Math.max(1, Math.floor((termRows - 2 - rows) / 2) + 1);
+  }
+
   // Calculate optimal display size in terminal columns/rows
-  private calculateOptimalDisplaySize(): { cols: number; rows: number } {
+  private calculateOptimalDisplaySize(): { cols: number; rows: number; offsetCol: number; offsetRow: number } {
     const termCols = process.stdout.columns || 80;
     const termRows = process.stdout.rows || 24;
 
@@ -79,7 +99,11 @@ export class KittyRenderer {
     displayCols = Math.max(displayCols, 32);
     displayRows = Math.max(displayRows, 15);
 
-    return { cols: displayCols, rows: displayRows };
+    // Calculate centering offsets (1-based for ANSI escape sequences)
+    const offsetCol = Math.max(1, Math.floor((termCols - displayCols) / 2) + 1);
+    const offsetRow = Math.max(1, Math.floor((availableRows - displayRows) / 2) + 1);
+
+    return { cols: displayCols, rows: displayRows, offsetCol, offsetRow };
   }
 
   // Get current scale (useful for display info)
@@ -100,9 +124,13 @@ export class KittyRenderer {
   // Update display dimensions (for terminal resize handling)
   setDimensions(): void {
     if (this.autoScale) {
-      const { cols, rows } = this.calculateOptimalDisplaySize();
+      const { cols, rows, offsetCol, offsetRow } = this.calculateOptimalDisplaySize();
       this.displayCols = cols;
       this.displayRows = rows;
+      this.offsetCol = offsetCol;
+      this.offsetRow = offsetRow;
+    } else {
+      this.calculateFixedScaleOffsets();
     }
   }
 
@@ -197,8 +225,8 @@ export class KittyRenderer {
     // Build output
     let output = '';
 
-    // Move cursor to top-left for image placement
-    output += `${ESC}[1;1H`;
+    // Move cursor to centered position for image placement
+    output += `${ESC}[${this.offsetRow};${this.offsetCol}H`;
 
     // Send native resolution image - Kitty will scale it
     output += this.sendImage(rgb, NES_WIDTH, NES_HEIGHT);
@@ -226,13 +254,15 @@ export class KittyRenderer {
   getStatusRow(): number {
     if (this.autoScale && this.displayRows > 0) {
       // When auto-scaling, we know exactly how many rows the image uses
-      return this.displayRows + 1;
+      // Account for vertical centering offset
+      return this.offsetRow + this.displayRows;
     }
     // When using pixel-based scaling, estimate rows needed
     // Each terminal row is typically ~20 pixels high (varies by font)
     const imageHeightPixels = 240 * this.scale;
     const approxRowHeight = 20;
-    return Math.ceil(imageHeightPixels / approxRowHeight) + 2;
+    const imageRows = Math.ceil(imageHeightPixels / approxRowHeight);
+    return this.offsetRow + imageRows + 1;
   }
 
   // Move cursor to status row

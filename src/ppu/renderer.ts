@@ -21,6 +21,8 @@ export class TerminalRenderer {
   private useTrueColor: boolean;
   private asciiMode: boolean;
   private asciiChars: string;
+  private offsetCol: number = 0;  // Horizontal offset for centering (0-based for padding)
+  private offsetRow: number = 1;  // Vertical offset for centering (1-based for ANSI)
 
   constructor(options: Partial<RendererOptions> = {}) {
     this.width = options.width ?? 128;
@@ -30,6 +32,23 @@ export class TerminalRenderer {
     this.asciiMode = options.asciiMode ?? false;
     // Use dense character set for better detail in ASCII mode
     this.asciiChars = this.asciiMode ? ASCII_CHARS_DENSE : ASCII_CHARS_SIMPLE;
+    // Calculate centering offsets
+    this.calculateOffsets();
+  }
+
+  // Calculate centering offsets based on terminal size
+  private calculateOffsets(): void {
+    const termCols = process.stdout.columns || 80;
+    const termRows = process.stdout.rows || 24;
+
+    // Leave 2 rows for status line
+    const availableRows = termRows - 2;
+
+    // Horizontal centering (0-based for padding)
+    this.offsetCol = Math.max(0, Math.floor((termCols - this.width) / 2));
+
+    // Vertical centering (1-based for ANSI escape sequences)
+    this.offsetRow = Math.max(1, Math.floor((availableRows - this.height) / 2) + 1);
   }
 
   // Render frame buffer to terminal string
@@ -99,10 +118,15 @@ export class TerminalRenderer {
         }
       }
 
-      output.push(lineChars.join(''));
+      // Add horizontal padding for centering
+      if (this.offsetCol > 0) {
+        output.push(' '.repeat(this.offsetCol) + lineChars.join(''));
+      } else {
+        output.push(lineChars.join(''));
+      }
     }
 
-    // Move cursor home and output frame
+    // Move cursor to centered position and output frame
     return this.moveCursorHome() + output.join('\n');
   }
 
@@ -112,9 +136,9 @@ export class TerminalRenderer {
     return this.asciiChars[Math.min(index, this.asciiChars.length - 1)];
   }
 
-  // Get ANSI escape sequence to move cursor to top-left
+  // Get ANSI escape sequence to move cursor to centered start position
   moveCursorHome(): string {
-    return '\x1b[H';
+    return `\x1b[${this.offsetRow};1H`;
   }
 
   // Clear screen
@@ -134,7 +158,7 @@ export class TerminalRenderer {
 
   // Get the row number for the status line (below the rendered frame)
   getStatusRow(): number {
-    return this.height + 1;
+    return this.offsetRow + this.height;
   }
 
   // Move cursor to a specific row
@@ -146,6 +170,8 @@ export class TerminalRenderer {
   setDimensions(width: number, height: number): void {
     this.width = width;
     this.height = height;
+    // Recalculate centering offsets
+    this.calculateOffsets();
   }
 
   // Get current dimensions
