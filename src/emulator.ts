@@ -116,6 +116,8 @@ export class Emulator {
   private lastFrameTime: number = 0;
   private targetFrameTime: number = 1000 / 60; // ~16.67ms for 60 FPS
   private resizeHandler: (() => void) | null = null;
+  private autoSaveInterval: ReturnType<typeof setInterval> | null = null;
+  private static readonly AUTO_SAVE_INTERVAL_MS = 120000; // 2 minutes
   // Pre-allocated audio buffer pool to avoid allocation per sample batch
   // Using 3 buffers to handle async speaker writes safely
   private audioBufferPool: Buffer[] = [];
@@ -307,6 +309,13 @@ export class Emulator {
         process.stdout.write(this.renderer.clearScreen());
       };
       process.stdout.on('resize', this.resizeHandler);
+    }
+
+    // Set up auto-save for battery-backed games
+    if (this.cartridge.header.hasBattery) {
+      this.autoSaveInterval = setInterval(() => {
+        this.cartridge.saveSram();
+      }, Emulator.AUTO_SAVE_INTERVAL_MS);
     }
 
     this.lastFrameTime = performance.now();
@@ -520,6 +529,12 @@ export class Emulator {
   }
 
   private cleanup(): void {
+    // Clear auto-save interval
+    if (this.autoSaveInterval) {
+      clearInterval(this.autoSaveInterval);
+      this.autoSaveInterval = null;
+    }
+
     // Save battery-backed RAM if the cartridge supports it
     this.cartridge.saveSram();
 
