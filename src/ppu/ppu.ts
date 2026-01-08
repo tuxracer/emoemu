@@ -97,7 +97,6 @@ export class PPU {
   private spriteCount: number = 0;
   private sprites: SpriteData[] = [];
   private spriteZeroOnLine: boolean = false;
-  private spriteZeroBeingRendered: boolean = false;
 
   // Saved horizontal scroll at start of scanline (for correct tile fetching)
   private scanlineStartCoarseX: number = 0;
@@ -105,7 +104,6 @@ export class PPU {
 
   // Tile cache for background rendering optimization
   // Caches tile data to avoid 4-6 PPU reads per pixel
-  private tileCacheValid: boolean = false;
   private tileCacheX: number = -1;  // Which 8-pixel tile span is cached
   private tileCachePatternLo: number = 0;
   private tileCachePatternHi: number = 0;
@@ -144,10 +142,8 @@ export class PPU {
     this.spriteCount = 0;
     this.sprites = [];
     this.spriteZeroOnLine = false;
-    this.spriteZeroBeingRendered = false;
     this.scanlineStartCoarseX = 0;
     this.scanlineStartNametable = 0;
-    this.tileCacheValid = false;
     this.tileCacheX = -1;
   }
 

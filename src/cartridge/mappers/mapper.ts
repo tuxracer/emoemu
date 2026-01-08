@@ -320,7 +320,7 @@ export class Mapper3 implements Mapper {
     return 0;
   }
 
-  ppuWrite(address: number, data: number): void {
+  ppuWrite(_address: number, _data: number): void {
     // CNROM uses CHR ROM, not RAM, so writes are ignored
   }
 }
@@ -465,7 +465,7 @@ export class Mapper9 implements Mapper {
     return 0;
   }
 
-  ppuWrite(address: number, data: number): void {
+  ppuWrite(_address: number, _data: number): void {
     // MMC2 uses CHR ROM, writes are ignored
   }
 
@@ -506,8 +506,6 @@ export class Mapper4 implements Mapper {
   // Mirroring ($A000)
   mirrorMode: number = 0;
 
-  // PRG RAM protect ($A001) - not fully implemented, most games don't use
-  private _prgRamProtect: number = 0;
 
   // IRQ counter ($C000-$E001)
   private irqLatch: number = 0;
@@ -574,8 +572,7 @@ export class Mapper4 implements Mapper {
           // $A000: Mirroring (0 = vertical, 1 = horizontal)
           this.mirrorMode = (data & 1) === 0 ? 1 : 0;
         } else {
-          // $A001: PRG RAM protect (not commonly used)
-          this._prgRamProtect = data;
+          // $A001: PRG RAM protect (not commonly used, ignored)
         }
       } else if (address < 0xe000) {
         // $C000-$DFFF: IRQ latch / IRQ reload

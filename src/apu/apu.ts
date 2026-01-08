@@ -337,7 +337,6 @@ class DMCChannel {
   private irqEnabled: boolean = false;
   private loop: boolean = false;
   private ratePeriod: number = 0;
-  private directLoad: number = 0;
   private sampleAddress: number = 0;
   private sampleLength: number = 0;
 
@@ -491,9 +490,6 @@ export class APU {
   private sampleCounter: number = 0;
   private cyclesPerSample: number;
 
-  // Memory read callback for DMC
-  private readMemory: ((address: number) => number) | null = null;
-
   // Audio callback
   onSamplesReady: ((samples: Float32Array) => void) | null = null;
 
@@ -505,7 +501,6 @@ export class APU {
   }
 
   setMemoryReader(reader: (address: number) => number): void {
-    this.readMemory = reader;
     this.dmc.readMemory = reader;
   }
 

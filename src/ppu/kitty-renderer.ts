@@ -13,7 +13,6 @@ const NES_HEIGHT = 240;
 
 // NES aspect ratio (256:240 = 16:15, but displayed on 4:3 TV)
 // Terminal cells are roughly 1:2 (width:height), so we need to account for that
-const CELL_ASPECT_RATIO = 0.5; // width/height of a terminal cell
 
 export interface KittyRendererOptions {
   scale?: number;  // Scale factor for the image (undefined = auto-fit to terminal)
