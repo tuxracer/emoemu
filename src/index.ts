@@ -575,14 +575,12 @@ async function main(): Promise<void> {
     console.log("");
   } else if (validState) {
     console.log("");
-    console.log("A saved state was found for this ROM.");
-    shouldRestore = await askYesNo(
-      "Would you like to resume from where you left off?"
-    );
-    console.log("");
+    console.log("Resuming from saved state...");
+    shouldRestore = true;
   }
 
   if (!shouldRestore) {
+    console.log("");
     console.log("Starting in 2 seconds...");
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
