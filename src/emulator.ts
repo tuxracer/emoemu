@@ -425,6 +425,9 @@ export class Emulator {
 
     // Error callback for graceful error recovery
     const onAudioError = (type: number, msg: string) => {
+      // Don't process errors if we're shutting down
+      if (!this.running) return;
+
       // Log error for debugging (type codes from RtAudioErrorType enum)
       const errorTypes = ['WARNING', 'DEBUG_WARNING', 'UNSPECIFIED', 'NO_DEVICES_FOUND',
         'INVALID_DEVICE', 'MEMORY_ERROR', 'INVALID_PARAMETER', 'INVALID_USE',
@@ -432,15 +435,18 @@ export class Emulator {
       const typeName = errorTypes[type] || `UNKNOWN(${type})`;
       console.error(`Audio error [${typeName}]: ${msg}`);
 
-      // Attempt recovery for recoverable errors (not during recovery)
-      if (!isRecovering && type >= 3) { // Errors more severe than warnings
+      // Attempt recovery for recoverable errors (not during recovery or shutdown)
+      if (!isRecovering && this.running && type >= 3) { // Errors more severe than warnings
         isRecovering = true;
         setTimeout(() => {
-          try {
-            createAudio();
-          } catch {
-            // If recreation fails, disable audio
-            this.audioEnabled = false;
+          // Double-check we're still running before recovery
+          if (this.running) {
+            try {
+              createAudio();
+            } catch {
+              // If recreation fails, disable audio
+              this.audioEnabled = false;
+            }
           }
           isRecovering = false;
         }, 100);
@@ -665,7 +671,13 @@ export class Emulator {
     if (this.rtAudio) {
       this.apu.onSamplesReady = null;
       try {
-        this.rtAudio.closeStream();
+        // Stop the stream first, then close it
+        if (this.rtAudio.isStreamRunning()) {
+          this.rtAudio.stop();
+        }
+        if (this.rtAudio.isStreamOpen()) {
+          this.rtAudio.closeStream();
+        }
       } catch {
         // Ignore cleanup errors
       }
