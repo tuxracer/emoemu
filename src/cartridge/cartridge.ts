@@ -16,6 +16,7 @@ export class Cartridge {
   chrRom: Uint8Array;
   prgRam: Uint8Array;
   chrRam: Uint8Array;
+  sramDirty: boolean = false;  // Set by mappers when PRG RAM is written
 
   private mapper: Mapper;
   private srmPath: string;
@@ -140,15 +141,20 @@ export class Cartridge {
 
   /**
    * Save battery-backed RAM to .srm file
-   * Should be called on emulator shutdown
+   * @param force - If true, save even if not dirty (used on shutdown)
    */
-  saveSram(): void {
+  saveSram(force: boolean = false): void {
     if (!this.header.hasBattery) {
+      return;
+    }
+
+    if (!force && !this.sramDirty) {
       return;
     }
 
     try {
       writeFileSync(this.srmPath, this.prgRam);
+      this.sramDirty = false;
       console.log(`Saved game data: ${this.srmPath}`);
     } catch (err) {
       console.error(`Failed to save game data: ${this.srmPath}`, err);

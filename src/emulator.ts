@@ -117,7 +117,7 @@ export class Emulator {
   private targetFrameTime: number = 1000 / 60; // ~16.67ms for 60 FPS
   private resizeHandler: (() => void) | null = null;
   private autoSaveInterval: ReturnType<typeof setInterval> | null = null;
-  private static readonly AUTO_SAVE_INTERVAL_MS = 120000; // 2 minutes
+  private static readonly AUTO_SAVE_INTERVAL_MS = 30000; // 30 seconds (only saves if SRAM was modified)
   // Pre-allocated audio buffer pool to avoid allocation per sample batch
   // Using 3 buffers to handle async speaker writes safely
   private audioBufferPool: Buffer[] = [];
@@ -535,8 +535,8 @@ export class Emulator {
       this.autoSaveInterval = null;
     }
 
-    // Save battery-backed RAM if the cartridge supports it
-    this.cartridge.saveSram();
+    // Save battery-backed RAM if the cartridge supports it (force save on exit)
+    this.cartridge.saveSram(true);
 
     // Remove resize handler
     if (this.resizeHandler) {
