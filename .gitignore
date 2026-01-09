@@ -6,5 +6,6 @@ roms/
 *.nes
 *.gba
 *.agb
+*.gbc
 *.srm
 *.state
