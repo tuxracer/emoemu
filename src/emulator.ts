@@ -42,6 +42,7 @@ export interface EmulatorOptions {
   enableGamepad?: boolean;  // Enable gamepad/controller support
   enableAudio?: boolean;  // Enable audio output (default: true)
   enableSaveState?: boolean;  // Enable save state loading/saving (default: true)
+  enableBatterySave?: boolean;  // Enable battery save loading/saving (default: true)
   showStatusBar?: boolean;  // Show status bar (default: true)
 }
 
@@ -125,6 +126,7 @@ export class Emulator {
   private rtAudio: InstanceType<typeof RtAudio> | null = null;
   private audioEnabled: boolean = true;
   private saveStateEnabled: boolean = true;
+  private batterySaveEnabled: boolean = true;
   private autoResize: boolean = false; // Whether to handle terminal resize events
   private showStatusBar: boolean = true;
   private romPath: string;
@@ -148,7 +150,9 @@ export class Emulator {
     this.core.loadRom(options.romPath);
 
     // Load battery save (.srm) if available
-    this.loadBatterySave();
+    if (options.enableBatterySave !== false) {
+      this.loadBatterySave();
+    }
 
     // Set target frame time based on core's FPS
     this.targetFrameTime = 1000 / this.systemInfo.fps;
@@ -158,6 +162,7 @@ export class Emulator {
     this.controller2 = new Controller();
     this.audioEnabled = options.enableAudio !== false;
     this.saveStateEnabled = options.enableSaveState !== false;
+    this.batterySaveEnabled = options.enableBatterySave !== false;
     this.showStatusBar = options.showStatusBar !== false;
 
     // Initialize input manager with controllers
@@ -379,7 +384,7 @@ export class Emulator {
 
     // Set up auto-save for battery-backed games
     // Saves to .srm file periodically in case of crash
-    if (this.core.hasBatterySave()) {
+    if (this.core.hasBatterySave() && this.batterySaveEnabled) {
       this.autoSaveInterval = setInterval(() => {
         this.saveBatterySave();
       }, Emulator.AUTO_SAVE_INTERVAL_MS);
@@ -710,7 +715,9 @@ export class Emulator {
     }
 
     // Save battery RAM to .srm file (must happen before destroy)
-    this.saveBatterySave();
+    if (this.batterySaveEnabled) {
+      this.saveBatterySave();
+    }
 
     // Save state on exit (must happen before destroy)
     if (this.saveStateEnabled) {

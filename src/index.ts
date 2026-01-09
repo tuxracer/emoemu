@@ -181,6 +181,7 @@ Options:
   --no-gamepad      Disable gamepad support
   --no-audio        Disable audio output
   --no-save-state   Disable save state loading and saving
+  --no-battery-save Disable battery save (.srm) loading and saving
   --no-status       Hide the status bar
   --debug-gamepad   Show raw gamepad HID data (for debugging)
   --help            Show this help message
@@ -217,6 +218,7 @@ function parseArgs(args: string[]): {
   enableGamepad: boolean;
   enableAudio: boolean;
   enableSaveState: boolean;
+  enableBatterySave: boolean;
   showStatusBar: boolean;
   debugGamepad: boolean;
 } {
@@ -234,6 +236,7 @@ function parseArgs(args: string[]): {
     enableGamepad: true,
     enableAudio: true,
     enableSaveState: true,
+    enableBatterySave: true,
     showStatusBar: true,
     debugGamepad: false,
   };
@@ -271,6 +274,8 @@ function parseArgs(args: string[]): {
       result.enableAudio = false;
     } else if (arg === "--no-save-state") {
       result.enableSaveState = false;
+    } else if (arg === "--no-battery-save") {
+      result.enableBatterySave = false;
     } else if (arg === "--no-status") {
       result.showStatusBar = false;
     } else if (arg === "--debug-gamepad") {
@@ -590,6 +595,11 @@ async function main(): Promise<void> {
     console.warn("Save states disabled. Progress will not be saved.");
   }
 
+  if (!options.enableBatterySave) {
+    console.log("");
+    console.warn("Battery saves disabled. Game save data (.srm) will not be loaded or saved.");
+  }
+
   try {
     // Only pass explicit dimensions if user specified them (enables auto-resize otherwise)
     const explicitDimensions =
@@ -606,6 +616,7 @@ async function main(): Promise<void> {
       enableGamepad: options.enableGamepad,
       enableAudio: options.enableAudio,
       enableSaveState: options.enableSaveState,
+      enableBatterySave: options.enableBatterySave,
       showStatusBar: options.showStatusBar,
     });
 
