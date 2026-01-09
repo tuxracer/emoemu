@@ -6,7 +6,7 @@ A terminal-based multi-core emulator written in TypeScript that renders graphics
 
 ```bash
 pnpm run build         # Build the project
-pnpm start -- <rom>    # Run a ROM (auto-detects core)
+pnpm run start <rom>   # Run a ROM (auto-detects core)
 pnpm run typecheck     # Type check without building
 pnpm test              # Run tests
 ```
