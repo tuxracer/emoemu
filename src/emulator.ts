@@ -994,10 +994,12 @@ export class Emulator {
       // Validate version - prompt user for incompatible save states
       if (state.version !== Emulator.SAVE_STATE_VERSION) {
         console.log(`Incompatible save state (version ${state.version}, need ${Emulator.SAVE_STATE_VERSION}).`);
-        const startFresh = await this.promptConfirmation('Delete old save and start fresh?');
-        if (startFresh) {
+        const continueAnyway = await this.promptConfirmation('Delete old save and start fresh?', true);
+        if (continueAnyway) {
           this.deleteSavedState();
           console.log('Old save state deleted.');
+        } else {
+          throw new Error('User cancelled due to incompatible save state');
         }
         return false;
       }
