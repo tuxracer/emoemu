@@ -567,7 +567,11 @@ async function main(): Promise<void> {
     console.warn(
       "Warning: A saved state file was found but appears to be corrupted or invalid."
     );
-    console.warn("The state file will be ignored and a fresh game will start.");
+    const continueAnyway = await askYesNo("Continue without saved state?", true);
+    if (!continueAnyway) {
+      console.log("Exiting.");
+      process.exit(0);
+    }
     console.log("");
   } else if (validState) {
     console.log("");
