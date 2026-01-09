@@ -790,7 +790,7 @@ export class Emulator {
    */
   private getStatePath(): string {
     // Remove common ROM extensions for all supported cores
-    return this.romPath.replace(/\.(nes|gba|agb)$/i, '.state');
+    return this.romPath.replace(/\.(nes|gbc|gb|gba|agb)$/i, '.state');
   }
 
   /**
