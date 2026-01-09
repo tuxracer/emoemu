@@ -1007,6 +1007,10 @@ export class Emulator {
       return true;
     } catch (err) {
       console.error(`Failed to load state: ${statePath}`, err);
+      const continueAnyway = await this.promptConfirmation('Continue without saved state?', true);
+      if (!continueAnyway) {
+        throw new Error('User cancelled due to save state load failure');
+      }
       return false;
     }
   }
