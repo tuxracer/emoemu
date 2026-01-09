@@ -143,11 +143,11 @@ const xboxOneProfile: GamepadProfile = {
       buttons.set(Button.Left, dpad.left || stickDpad.left);
       buttons.set(Button.Right, dpad.right || stickDpad.right);
 
-      // Face buttons (byte 14): A=0x01, B=0x02, X=0x04, Y=0x08
+      // Face buttons (byte 14): A=0x01, B=0x02, X=0x08, Y=0x10
       const faceButtons = data[14];
       // Map: A/Y -> NES A, B/X -> NES B
-      buttons.set(Button.A, (faceButtons & 0x01) !== 0 || (faceButtons & 0x08) !== 0);
-      buttons.set(Button.B, (faceButtons & 0x02) !== 0 || (faceButtons & 0x04) !== 0);
+      buttons.set(Button.A, (faceButtons & 0x01) !== 0 || (faceButtons & 0x10) !== 0);
+      buttons.set(Button.B, (faceButtons & 0x02) !== 0 || (faceButtons & 0x08) !== 0);
 
       // Menu buttons (byte 15): View=0x04, Menu=0x08
       const menuButtons = data[15];
