@@ -14,6 +14,7 @@ import { PPU } from './ppu.js';
 import { Bus } from './bus.js';
 import { Timer } from './timer.js';
 import { Cartridge } from './cartridge.js';
+import { APU } from './apu.js';
 
 // GBC Button IDs (matching joypad register bit positions)
 export const GBCButton = {
@@ -66,6 +67,7 @@ export class GBCCore implements Core {
   private bus: Bus | null = null;
   private timer: Timer | null = null;
   private cartridge: Cartridge | null = null;
+  private apu: APU | null = null;
 
   private romPath = '';
   private buttonState = new Map<number, boolean>();
@@ -90,8 +92,10 @@ export class GBCCore implements Core {
     // Create components
     this.bus = new Bus();
     this.timer = new Timer(() => this.bus!.requestInterrupt(0x04)); // Timer interrupt
+    this.apu = new APU();
     this.bus.setCartridge(this.cartridge);
     this.bus.setTimer(this.timer);
+    this.bus.setApu(this.apu);
 
     // Create CPU with memory callbacks
     this.cpu = new CPU(
@@ -111,6 +115,7 @@ export class GBCCore implements Core {
     this.ppu?.reset();
     this.bus?.reset();
     this.timer?.reset();
+    this.apu?.reset();
 
     // Reset button states
     for (const button of GBC_BUTTONS) {
@@ -124,6 +129,7 @@ export class GBCCore implements Core {
     this.bus = null;
     this.timer = null;
     this.cartridge = null;
+    this.apu = null;
   }
 
   runFrame(): void {
@@ -162,6 +168,12 @@ export class GBCCore implements Core {
       // In double speed mode, PPU still runs at normal speed
       const ppuCycles = this.bus.isDoubleSpeed() ? cycles / 2 : cycles;
       this.ppu.tick(ppuCycles);
+
+      // Tick APU (always runs at normal speed, even in double speed mode)
+      if (this.apu) {
+        const apuCycles = this.bus.isDoubleSpeed() ? cycles / 2 : cycles;
+        this.apu.tick(apuCycles);
+      }
     }
   }
 
@@ -180,8 +192,10 @@ export class GBCCore implements Core {
     };
   }
 
-  setAudioCallback(_callback: ((samples: Float32Array) => void) | null): void {
-    // Audio not implemented for first milestone
+  setAudioCallback(callback: ((samples: Float32Array) => void) | null): void {
+    if (this.apu) {
+      this.apu.onSamplesReady = callback;
+    }
   }
 
   setButtonState(port: number, button: number, pressed: boolean): void {

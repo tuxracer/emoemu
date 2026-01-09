@@ -3,6 +3,7 @@
 
 import type { Cartridge } from './cartridge.js';
 import type { Timer } from './timer.js';
+import type { APU } from './apu.js';
 
 export interface BusState {
   wram: number[][];
@@ -80,6 +81,7 @@ export class Bus {
   // External components
   private cartridge: Cartridge | null = null;
   private timer: Timer | null = null;
+  private apu: APU | null = null;
 
   // PPU register callbacks
   private ppuRead: ((addr: number) => number) | null = null;
@@ -194,6 +196,10 @@ export class Bus {
 
   setTimer(timer: Timer): void {
     this.timer = timer;
+  }
+
+  setApu(apu: APU): void {
+    this.apu = apu;
   }
 
   setPPUCallbacks(
@@ -452,12 +458,13 @@ export class Bus {
       case 0xff0f:
         return this.interruptFlags | 0xe0;
 
-      // Audio registers ($FF10-$FF3F) - stub, return 0 for now
+      // Audio registers ($FF10-$FF26) and Wave RAM ($FF30-$FF3F)
       case 0xff10:
       case 0xff11:
       case 0xff12:
       case 0xff13:
       case 0xff14:
+      case 0xff15:
       case 0xff16:
       case 0xff17:
       case 0xff18:
@@ -467,6 +474,7 @@ export class Bus {
       case 0xff1c:
       case 0xff1d:
       case 0xff1e:
+      case 0xff1f:
       case 0xff20:
       case 0xff21:
       case 0xff22:
@@ -474,9 +482,6 @@ export class Bus {
       case 0xff24:
       case 0xff25:
       case 0xff26:
-        return 0xff;
-
-      // Wave RAM ($FF30-$FF3F)
       case 0xff30:
       case 0xff31:
       case 0xff32:
@@ -493,7 +498,7 @@ export class Bus {
       case 0xff3d:
       case 0xff3e:
       case 0xff3f:
-        return 0xff;
+        return this.apu?.read(address) ?? 0xff;
 
       // PPU registers ($FF40-$FF4B)
       case 0xff40:
@@ -581,12 +586,13 @@ export class Bus {
         this.interruptFlags = value & 0x1f;
         break;
 
-      // Audio registers ($FF10-$FF3F) - stub for now
+      // Audio registers ($FF10-$FF26) and Wave RAM ($FF30-$FF3F)
       case 0xff10:
       case 0xff11:
       case 0xff12:
       case 0xff13:
       case 0xff14:
+      case 0xff15:
       case 0xff16:
       case 0xff17:
       case 0xff18:
@@ -596,6 +602,7 @@ export class Bus {
       case 0xff1c:
       case 0xff1d:
       case 0xff1e:
+      case 0xff1f:
       case 0xff20:
       case 0xff21:
       case 0xff22:
@@ -603,9 +610,6 @@ export class Bus {
       case 0xff24:
       case 0xff25:
       case 0xff26:
-        break;
-
-      // Wave RAM ($FF30-$FF3F)
       case 0xff30:
       case 0xff31:
       case 0xff32:
@@ -622,6 +626,7 @@ export class Bus {
       case 0xff3d:
       case 0xff3e:
       case 0xff3f:
+        this.apu?.write(address, value);
         break;
 
       // PPU registers ($FF40-$FF4B)
