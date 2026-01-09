@@ -82,9 +82,18 @@
 - [x] Audio output mixing (NESDev wiki formula)
 
 ### Audio Output
-- [x] Audio via speaker package (44100 Hz)
+- [x] Audio via audify/RtAudio (22050 Hz stereo)
 - [x] Optional audio disable (--no-audio flag)
 - [x] Audio sync with emulation (cycle-based sampling)
+- [x] Sample buffering for fixed-size frame output
+
+### Audio Architecture Improvements
+- [x] Use `frameOutputCallback` for flow control (replace manual timing sync)
+- [ ] Leverage RtAudio's internal queue (write smaller chunks more frequently)
+- [ ] Fixed-size ring buffer (prevent unbounded memory growth)
+- [ ] Higher sample rate (44100 Hz for better quality)
+- [ ] Error callback for graceful error recovery
+- [ ] Smaller frame size (10ms or 5ms for lower latency)
 
 ---
 

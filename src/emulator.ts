@@ -400,6 +400,16 @@ export class Emulator {
     // Pre-allocated output buffer for RtAudio (exact frame size required)
     const outputBuffer = Buffer.alloc(frameBytes);
 
+    // Flow control using frameOutputCallback
+    let framesWritten = 0;
+    let framesPlayed = 0;
+    const maxQueuedFrames = 4; // Maximum frames to buffer ahead
+
+    // Frame output callback - called when a frame finishes playing
+    const onFramePlayed = () => {
+      framesPlayed++;
+    };
+
     // Function to create/recreate RtAudio
     const createAudio = () => {
       if (this.rtAudio) {
@@ -425,31 +435,27 @@ export class Emulator {
         frameSize,
         'TUI-NES',
         null, // No input callback
-        null  // No frame output callback
+        onFramePlayed // Frame output callback for flow control
       );
 
       this.rtAudio.start();
-      // Reset buffer on audio recreation
+      // Reset state on audio recreation
       sampleBufferPos = 0;
+      framesWritten = 0;
+      framesPlayed = 0;
     };
 
     createAudio();
 
-    // Track audio timing for sync
-    let audioStartTime = performance.now();
-    let samplesWritten = 0;
-    const maxAheadMs = 20;
-    const maxBehindMs = 50;
-
-    // Track consecutive resyncs to detect stuck state
-    let resyncCount = 0;
-    let lastResyncTime = 0;
-    const maxResyncsBeforeReset = 5;
-    const resyncWindowMs = 2000; // Reset counter if no resync in 2 seconds
-
     // Helper to write a complete frame to RtAudio
     const writeFrame = () => {
-      if (!this.rtAudio || sampleBufferPos < frameSize) return;
+      if (!this.rtAudio || sampleBufferPos < frameSize) return false;
+
+      // Flow control: don't queue too many frames ahead
+      const queuedFrames = framesWritten - framesPlayed;
+      if (queuedFrames >= maxQueuedFrames) {
+        return false; // Wait for playback to catch up
+      }
 
       // Convert float samples to int16 stereo in output buffer
       // Duplicate mono sample to both left and right channels
@@ -462,7 +468,7 @@ export class Emulator {
       }
 
       this.rtAudio.write(outputBuffer);
-      samplesWritten += frameSize;
+      framesWritten++;
 
       // Shift remaining samples to front of buffer
       const remaining = sampleBufferPos - frameSize;
@@ -470,49 +476,12 @@ export class Emulator {
         sampleBuffer.copyWithin(0, frameSize, sampleBufferPos);
       }
       sampleBufferPos = remaining;
+      return true;
     };
 
     // Connect APU sample output to RtAudio
     this.apu.onSamplesReady = (samples: Float32Array) => {
       if (!this.rtAudio || !this.audioEnabled) return;
-
-      const now = performance.now();
-      const elapsedMs = now - audioStartTime;
-      const expectedSamples = (elapsedMs / 1000) * sampleRate;
-      const aheadSamples = samplesWritten - expectedSamples;
-      const aheadMs = (aheadSamples / sampleRate) * 1000;
-
-      // If too far ahead, skip this batch
-      if (aheadMs > maxAheadMs) {
-        return;
-      }
-
-      // If too far behind, resync timing
-      if (aheadMs < -maxBehindMs) {
-        // Track resyncs to detect persistent problems
-        if (now - lastResyncTime < resyncWindowMs) {
-          resyncCount++;
-        } else {
-          resyncCount = 1;
-        }
-        lastResyncTime = now;
-
-        // If too many resyncs, recreate audio to reset all state
-        if (resyncCount >= maxResyncsBeforeReset) {
-          createAudio();
-          resyncCount = 0;
-        }
-
-        audioStartTime = now;
-        samplesWritten = 0;
-        sampleBufferPos = 0; // Clear sample buffer on resync
-        return;
-      }
-
-      // Reset resync counter if audio is healthy
-      if (now - lastResyncTime > resyncWindowMs) {
-        resyncCount = 0;
-      }
 
       // Add incoming samples to buffer
       // Expand buffer if needed
@@ -525,9 +494,9 @@ export class Emulator {
       sampleBuffer.set(samples, sampleBufferPos);
       sampleBufferPos += samples.length;
 
-      // Write complete frames
-      while (sampleBufferPos >= frameSize) {
-        writeFrame();
+      // Write complete frames (flow controlled by callback)
+      while (sampleBufferPos >= frameSize && writeFrame()) {
+        // Keep writing until we can't anymore
       }
     };
   }
