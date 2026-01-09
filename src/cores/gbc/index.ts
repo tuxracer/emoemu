@@ -9,12 +9,23 @@ import type {
   ButtonDefinition,
 } from '../../core/core.js';
 import { registerCore } from '../../frontend/core-registry.js';
-import { CPU } from './cpu.js';
-import { PPU } from './ppu.js';
-import { Bus } from './bus.js';
-import { Timer } from './timer.js';
-import { Cartridge } from './cartridge.js';
-import { APU } from './apu.js';
+import { CPU, type CpuState } from './cpu.js';
+import { PPU, type PpuState } from './ppu.js';
+import { Bus, type BusState } from './bus.js';
+import { Timer, type TimerState } from './timer.js';
+import { Cartridge, type CartridgeState } from './cartridge.js';
+import { APU, type APUState } from './apu.js';
+
+// Combined state for all GBC components
+interface GBCState {
+  cpu: CpuState;
+  ppu: PpuState;
+  bus: BusState;
+  timer: TimerState;
+  cartridge: CartridgeState;
+  cartridgeRam: number[];
+  apu: APUState;
+}
 
 // GBC Button IDs (matching joypad register bit positions)
 export const GBCButton = {
@@ -224,18 +235,50 @@ export class GBCCore implements Core {
   }
 
   getState(): CoreState {
-    // Save states not implemented for first milestone
+    if (!this.cpu || !this.ppu || !this.bus || !this.timer || !this.cartridge || !this.apu) {
+      throw new Error('Cannot save state: emulator not initialized');
+    }
+
+    const gbcState: GBCState = {
+      cpu: this.cpu.getState(),
+      ppu: this.ppu.getState(),
+      bus: this.bus.getState(),
+      timer: this.timer.getState(),
+      cartridge: this.cartridge.getState(),
+      cartridgeRam: Array.from(this.cartridge.getRam()),
+      apu: this.apu.getState(),
+    };
+
     return {
       version: GBC_STATE_VERSION,
       coreId: 'gbc',
       gameId: this.romPath,
-      data: {},
+      data: gbcState as unknown as Record<string, unknown>,
     };
   }
 
-  setState(_state: CoreState): void {
-    // Save states not implemented for first milestone
-    throw new Error('Save states not implemented');
+  setState(state: CoreState): void {
+    if (!this.cpu || !this.ppu || !this.bus || !this.timer || !this.cartridge || !this.apu) {
+      throw new Error('Cannot restore state: emulator not initialized');
+    }
+
+    if (state.coreId !== 'gbc') {
+      throw new Error(`Invalid state: expected coreId 'gbc', got '${state.coreId}'`);
+    }
+
+    if (state.version !== GBC_STATE_VERSION) {
+      throw new Error(`Incompatible state version: expected ${GBC_STATE_VERSION}, got ${state.version}`);
+    }
+
+    const gbcState = state.data as unknown as GBCState;
+
+    this.cpu.setState(gbcState.cpu);
+    this.ppu.setState(gbcState.ppu);
+    this.bus.setState(gbcState.bus);
+    this.timer.setState(gbcState.timer);
+    this.cartridge.setState(gbcState.cartridge);
+    this.cartridge.setRam(new Uint8Array(gbcState.cartridgeRam));
+    this.apu.setState(gbcState.apu);
   }
 
   getStateVersion(): number {
