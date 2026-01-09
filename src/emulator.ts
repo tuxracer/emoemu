@@ -789,8 +789,8 @@ export class Emulator {
    * Get the path for the save state file
    */
   private getStatePath(): string {
-    // Remove common ROM extensions for all supported cores
-    return this.romPath.replace(/\.(nes|gbc|gb|gba|agb)$/i, '.state');
+    // Append .state to the full ROM filename
+    return this.romPath + '.state';
   }
 
   /**
