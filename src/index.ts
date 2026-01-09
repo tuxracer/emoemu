@@ -85,9 +85,10 @@ function askYesNo(question: string, defaultYes: boolean = true): Promise<boolean
             const buttonStates = profile.parseReport(data);
             const aPressed = buttonStates.get(Button.A) ?? false;
             const bPressed = buttonStates.get(Button.B) ?? false;
+            const startPressed = buttonStates.get(Button.Start) ?? false;
 
-            if (aPressed) {
-              console.log('A'); // Echo the selection
+            if (aPressed || startPressed) {
+              console.log(aPressed ? 'A' : 'Start'); // Echo the selection
               finish(true);
             } else if (bPressed) {
               console.log('B'); // Echo the selection

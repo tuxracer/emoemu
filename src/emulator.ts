@@ -846,9 +846,11 @@ export class Emulator {
           if (resolved) {
             return;
           }
-          // Check if A is pressed (confirm)
-          if (this.controller1.getButton(Button.A)) {
-            console.log('A'); // Echo the selection
+          // Check if A or Start is pressed (confirm)
+          const aPressed = this.controller1.getButton(Button.A);
+          const startPressed = this.controller1.getButton(Button.Start);
+          if (aPressed || startPressed) {
+            console.log(aPressed ? 'A' : 'Start'); // Echo the selection
             cleanup();
             resolve(true);
           }
