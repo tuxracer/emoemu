@@ -707,11 +707,11 @@ export class Emulator {
       this.autoSaveInterval = null;
     }
 
+    // Save state on exit (must happen before destroy)
+    this.saveState();
+
     // Destroy core (handles battery-backed RAM save)
     this.core.destroy();
-
-    // Save state on exit
-    this.saveState();
 
     // Remove resize handler
     if (this.resizeHandler) {
