@@ -420,6 +420,33 @@ export class Emulator {
       tryWriteFrames();
     };
 
+    // Track if we're currently recovering to prevent recursive recovery
+    let isRecovering = false;
+
+    // Error callback for graceful error recovery
+    const onAudioError = (type: number, msg: string) => {
+      // Log error for debugging (type codes from RtAudioErrorType enum)
+      const errorTypes = ['WARNING', 'DEBUG_WARNING', 'UNSPECIFIED', 'NO_DEVICES_FOUND',
+        'INVALID_DEVICE', 'MEMORY_ERROR', 'INVALID_PARAMETER', 'INVALID_USE',
+        'DRIVER_ERROR', 'SYSTEM_ERROR', 'THREAD_ERROR'];
+      const typeName = errorTypes[type] || `UNKNOWN(${type})`;
+      console.error(`Audio error [${typeName}]: ${msg}`);
+
+      // Attempt recovery for recoverable errors (not during recovery)
+      if (!isRecovering && type >= 3) { // Errors more severe than warnings
+        isRecovering = true;
+        setTimeout(() => {
+          try {
+            createAudio();
+          } catch {
+            // If recreation fails, disable audio
+            this.audioEnabled = false;
+          }
+          isRecovering = false;
+        }, 100);
+      }
+    };
+
     // Function to create/recreate RtAudio
     const createAudio = () => {
       if (this.rtAudio) {
@@ -445,7 +472,9 @@ export class Emulator {
         frameSize,
         'TUI-NES',
         null, // No input callback
-        onFramePlayed // Frame output callback for flow control
+        onFramePlayed, // Frame output callback for flow control
+        undefined, // Default flags
+        onAudioError // Error callback for graceful recovery
       );
 
       this.rtAudio.start();
