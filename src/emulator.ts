@@ -388,6 +388,18 @@ export class Emulator {
   private setupAudio(): void {
     const sampleRate = this.apu.getSampleRate();
 
+    // Suppress native audio library warnings (buffer underflow messages)
+    // These come from CoreAudio/mpg123 and can't be caught in JS
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+      const str = typeof chunk === 'string' ? chunk : chunk.toString();
+      // Filter out audio buffer underflow warnings
+      if (str.includes('buffer underflow') || str.includes('coreaudio')) {
+        return true;
+      }
+      return originalStderrWrite(chunk, ...args);
+    }) as typeof process.stderr.write;
+
     // Create speaker for direct audio output
     this.speaker = new Speaker({
       channels: 1,
@@ -401,56 +413,51 @@ export class Emulator {
       this.speaker = null;
     });
 
-    // Track audio timing to stay in sync with real-time
+    // Track audio timing for sync
     let audioStartTime = performance.now();
     let samplesWritten = 0;
-    const maxAheadMs = 15; // Drop audio if more than 15ms ahead
+    const maxAheadMs = 20;
+    const maxBehindMs = 50;
 
     // Connect APU sample output directly to speaker
     this.apu.onSamplesReady = (samples: Float32Array) => {
-      if (this.speaker && this.audioEnabled) {
-        const now = performance.now();
-        const elapsedMs = now - audioStartTime;
-        const expectedSamples = (elapsedMs / 1000) * sampleRate;
-        const aheadSamples = samplesWritten - expectedSamples;
-        const aheadMs = (aheadSamples / sampleRate) * 1000;
+      if (!this.speaker || !this.audioEnabled) return;
 
-        // If we're too far ahead, skip this batch (don't reset counters)
-        if (aheadMs > maxAheadMs) {
-          // Adjust samplesWritten to pretend we wrote, keeping us in sync
-          // This effectively "catches up" without resetting
-          samplesWritten = expectedSamples + (maxAheadMs / 1000) * sampleRate;
-          return;
-        }
+      const now = performance.now();
+      const elapsedMs = now - audioStartTime;
+      const expectedSamples = (elapsedMs / 1000) * sampleRate;
+      const aheadSamples = samplesWritten - expectedSamples;
+      const aheadMs = (aheadSamples / sampleRate) * 1000;
 
-        // If we've drifted too far behind (negative aheadMs), resync
-        if (aheadMs < -100) {
-          audioStartTime = now;
-          samplesWritten = 0;
-        }
-
-        // Use pre-allocated buffer pool to avoid allocation per batch
-        // Rotate through buffers to handle async speaker writes safely
-        const requiredSize = samples.length * 2;
-        let buffer = this.audioBufferPool[this.audioBufferIndex];
-
-        // Lazily allocate buffers on first use or if size changed
-        if (!buffer || buffer.length < requiredSize) {
-          buffer = Buffer.alloc(requiredSize);
-          this.audioBufferPool[this.audioBufferIndex] = buffer;
-        }
-
-        for (let i = 0; i < samples.length; i++) {
-          const sample = Math.max(-1, Math.min(1, samples[i]));
-          const int16 = (sample * 32767) | 0;
-          buffer.writeInt16LE(int16, i * 2);
-        }
-        this.speaker.write(buffer);
-        samplesWritten += samples.length;
-
-        // Rotate to next buffer in pool
-        this.audioBufferIndex = (this.audioBufferIndex + 1) % Emulator.AUDIO_BUFFER_COUNT;
+      // If too far ahead, skip this batch
+      if (aheadMs > maxAheadMs) {
+        return;
       }
+
+      // If too far behind, resync timing (accept the skip)
+      if (aheadMs < -maxBehindMs) {
+        audioStartTime = now;
+        samplesWritten = 0;
+      }
+
+      // Use pre-allocated buffer pool
+      const requiredSize = samples.length * 2;
+      let buffer = this.audioBufferPool[this.audioBufferIndex];
+
+      if (!buffer || buffer.length < requiredSize) {
+        buffer = Buffer.alloc(requiredSize);
+        this.audioBufferPool[this.audioBufferIndex] = buffer;
+      }
+
+      for (let i = 0; i < samples.length; i++) {
+        const sample = Math.max(-1, Math.min(1, samples[i]));
+        const int16 = (sample * 32767) | 0;
+        buffer.writeInt16LE(int16, i * 2);
+      }
+
+      this.speaker.write(buffer);
+      samplesWritten += samples.length;
+      this.audioBufferIndex = (this.audioBufferIndex + 1) % Emulator.AUDIO_BUFFER_COUNT;
     };
   }
 

@@ -471,6 +471,25 @@ for (let i = 0; i < 31; i++) {
   PULSE_TABLE[i] = i === 0 ? 0 : 95.88 / (8128 / i + 100);
 }
 
+// Precomputed TND mixer lookup table
+// Indexed by: (triangle << 11) | (noise << 7) | dmc
+// triangle: 0-15, noise: 0-15, dmc: 0-127
+// Total: 16 * 16 * 128 = 32768 entries (~128KB)
+const TND_TABLE = new Float32Array(32768);
+for (let t = 0; t < 16; t++) {
+  for (let n = 0; n < 16; n++) {
+    for (let d = 0; d < 128; d++) {
+      const index = (t << 11) | (n << 7) | d;
+      if (t === 0 && n === 0 && d === 0) {
+        TND_TABLE[index] = 0;
+      } else {
+        const tndSum = t / 8227 + n / 12241 + d / 22638;
+        TND_TABLE[index] = 159.79 / (1 / tndSum + 100);
+      }
+    }
+  }
+}
+
 // Main APU class
 export class APU {
   private pulse1: PulseChannel = new PulseChannel(1);
@@ -504,7 +523,7 @@ export class APU {
 
   constructor() {
     this.cyclesPerSample = Math.floor(this.cpuFrequency / this.sampleRate);
-    // Small buffer for low latency (~5.8ms at 44100Hz)
+    // Small buffer for low latency - ring buffer in emulator handles buffering
     this.sampleBuffer = new Float32Array(256);
     this.reset();
   }
@@ -663,7 +682,7 @@ export class APU {
     if (this.sampleCounter >= this.cyclesPerSample) {
       this.sampleCounter = 0;
 
-      // Inline mixer for performance
+      // Inline mixer for performance using lookup tables
       const p1 = this.pulse1.output();
       const p2 = this.pulse2.output();
       const pulseOut = PULSE_TABLE[p1 + p2];
@@ -672,12 +691,8 @@ export class APU {
       const n = this.noise.output();
       const d = this.dmc.output();
 
-      // TND mixer - fast path for silence
-      let tndOut = 0;
-      if (t | n | d) {
-        const tndSum = t / 8227 + n / 12241 + d / 22638;
-        tndOut = 159.79 / (1 / tndSum + 100);
-      }
+      // TND mixer using precomputed lookup table
+      const tndOut = TND_TABLE[(t << 11) | (n << 7) | d];
 
       this.sampleBuffer[this.sampleIndex++] = pulseOut + tndOut;
 
