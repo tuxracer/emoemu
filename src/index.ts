@@ -9,6 +9,15 @@ import { gunzipSync } from 'zlib';
 import type { SaveState } from './emulator.js';
 import { findProfile, isGamepadDevice } from './input/gamepad-profiles.js';
 import { Button } from './input/controller.js';
+import {
+  listCores,
+  getSupportedExtensions,
+  detectCoreFactory,
+  getCoreFactory,
+} from './frontend/core-registry.js';
+
+// Import NES core to register it with the registry
+import './cores/nes/index.js';
 
 /**
  * Validate a state file and return the parsed state if valid
@@ -133,18 +142,28 @@ function askYesNo(question: string, defaultYes: boolean = true): Promise<boolean
 
 /**
  * Get the save state path for a ROM
+ * Handles any ROM extension by replacing it with .state
  */
 function getStatePath(romPath: string): string {
-  return romPath.replace(/\.nes$/i, '.state');
+  // Get all supported extensions and create a regex pattern
+  const extensions = getSupportedExtensions();
+  const extPattern = extensions.map(ext => ext.replace('.', '\\.')).join('|');
+  const regex = new RegExp(`(${extPattern})$`, 'i');
+  return romPath.replace(regex, '.state');
 }
 
 function printUsage(): void {
-  console.log(`
-TUI-NES - Terminal NES Emulator
+  // Get supported extensions from core registry
+  const extensions = getSupportedExtensions().join(', ');
 
-Usage: tui-nes <rom.nes> [options]
+  console.log(`
+TUI-NES - Terminal Retro Emulator
+
+Usage: tui-nes <rom> [options]
 
 Options:
+  --core <id>       Use a specific emulator core (see --list-cores)
+  --list-cores      List available emulator cores and exit
   --kitty           Use Kitty graphics protocol (default, best quality)
   --terminal        Use terminal character rendering (Unicode half-blocks)
   --ascii           Use colored ASCII character rendering
@@ -159,6 +178,8 @@ Options:
   --no-status       Hide the status bar
   --debug-gamepad   Show raw gamepad HID data (for debugging)
   --help            Show this help message
+
+Supported ROM formats: ${extensions}
 
 Controls:
   W/Arrow Up      D-Pad Up
@@ -185,6 +206,8 @@ function parseArgs(args: string[]): {
   scale: number | undefined;
   help: boolean;
   listGamepads: boolean;
+  listCoresFlag: boolean;
+  core: string | undefined;
   enableGamepad: boolean;
   enableAudio: boolean;
   showStatusBar: boolean;
@@ -199,6 +222,8 @@ function parseArgs(args: string[]): {
     scale: undefined as number | undefined,  // undefined = auto-fit to terminal
     help: false,
     listGamepads: false,
+    listCoresFlag: false,
+    core: undefined as string | undefined,
     enableGamepad: true,
     enableAudio: true,
     showStatusBar: true,
@@ -228,6 +253,10 @@ function parseArgs(args: string[]): {
       result.renderMode = 'terminal';
     } else if (arg === '--list-gamepads') {
       result.listGamepads = true;
+    } else if (arg === '--list-cores') {
+      result.listCoresFlag = true;
+    } else if (arg === '--core' && args[i + 1]) {
+      result.core = args[++i];
     } else if (arg === '--no-gamepad') {
       result.enableGamepad = false;
     } else if (arg === '--no-audio') {
@@ -382,6 +411,26 @@ function listGamepads(): void {
   console.log('  - Generic USB Gamepad (fallback)');
 }
 
+function listCoresCommand(): void {
+  console.log('Available Emulator Cores');
+  console.log('========================\n');
+
+  const cores = listCores();
+
+  if (cores.length === 0) {
+    console.log('No cores registered.\n');
+  } else {
+    for (const core of cores) {
+      console.log(`${core.name} (--core ${core.id})`);
+      console.log(`  Extensions: ${core.extensions.join(', ')}`);
+      console.log('');
+    }
+  }
+
+  console.log('Note: Cores are auto-detected by ROM file extension.');
+  console.log('      Use --core <id> to override auto-detection.');
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const options = parseArgs(args);
@@ -389,6 +438,12 @@ async function main(): Promise<void> {
   // Handle --list-gamepads before checking for ROM
   if (options.listGamepads) {
     listGamepads();
+    process.exit(0);
+  }
+
+  // Handle --list-cores before checking for ROM
+  if (options.listCoresFlag) {
+    listCoresCommand();
     process.exit(0);
   }
 
@@ -404,11 +459,36 @@ async function main(): Promise<void> {
     process.exit(options.help ? 0 : 1);
   }
 
+  // Detect or validate core for the ROM
+  let coreFactory;
+  if (options.core) {
+    // User specified a core explicitly
+    coreFactory = getCoreFactory(options.core);
+    if (!coreFactory) {
+      console.error(`Error: Unknown core '${options.core}'`);
+      console.error('Use --list-cores to see available cores.');
+      process.exit(1);
+    }
+  } else {
+    // Auto-detect core by file extension
+    coreFactory = detectCoreFactory(options.romPath);
+    if (!coreFactory) {
+      const supportedExts = getSupportedExtensions().join(', ');
+      console.error(`Error: Unsupported ROM format for '${options.romPath}'`);
+      console.error(`Supported formats: ${supportedExts}`);
+      console.error('Use --list-cores to see available cores.');
+      process.exit(1);
+    }
+  }
+
   // Calculate display size (auto-fit to terminal if not specified) - for terminal mode
   const displaySize = calculateDisplaySize(options.width, options.height);
 
-  console.log('TUI-NES - Terminal NES Emulator');
-  console.log('================================');
+  const systemInfo = coreFactory.getSystemInfo();
+
+  console.log('TUI-NES - Terminal Retro Emulator');
+  console.log('==================================');
+  console.log(`Core: ${systemInfo.name}`);
   console.log(`Loading ROM: ${options.romPath}`);
   console.log(`Terminal: ${process.stdout.columns || '?'}x${process.stdout.rows || '?'}`);
   console.log(`Render mode: ${options.renderMode}`);
