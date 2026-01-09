@@ -22,6 +22,7 @@ export type RenderMode = 'terminal' | 'kitty' | 'ascii' | 'emoji';
 // Common renderer interface
 interface Renderer {
   render(frameBuffer: Uint8Array): string;
+  renderRgb15?(frameBuffer: Uint16Array): string;  // For RGB15 cores (GBC, GBA)
   clearScreen(): string;
   hideCursor(): string;
   showCursor(): string;
@@ -44,58 +45,67 @@ export interface EmulatorOptions {
 }
 
 // Calculate optimal dimensions for terminal/ASCII/emoji rendering
-function calculateTerminalDimensions(mode: 'terminal' | 'ascii' | 'emoji'): { width: number; height: number } {
+// sourceWidth/sourceHeight: core framebuffer dimensions
+// pixelAspectRatio: PAR for the core (e.g., 8/7 for NES, 1.0 for GBC)
+function calculateTerminalDimensions(
+  mode: 'terminal' | 'ascii' | 'emoji',
+  sourceWidth: number = 256,
+  sourceHeight: number = 240,
+  pixelAspectRatio: number = 8 / 7
+): { width: number; height: number } {
   const termCols = process.stdout.columns || 80;
   const termRows = process.stdout.rows || 24;
 
   // Leave 2 rows for status line
   const availableRows = termRows - 2;
 
-  // NES is 256x240 (8:7.5 aspect ratio, displayed on 4:3 TV)
+  // Calculate display aspect ratio from source dimensions and PAR
+  // displayAspect = (sourceWidth * PAR) / sourceHeight
+  const displayAspect = (sourceWidth * pixelAspectRatio) / sourceHeight;
+
   // Terminal cells are roughly 1:2 (width:height)
-  // For terminal mode (half-blocks): each row = 2 NES pixels vertically
-  // For ASCII mode: each row = 1 NES pixel
-  // For emoji mode: each emoji = 1 NES pixel, but 2 terminal columns wide
+  const cellAspect = 0.5; // width / height of a terminal cell
 
   if (mode === 'emoji') {
     // Emoji: 1 emoji = 1 pixel, each emoji is 2 terminal columns wide
     // Emojis appear roughly square (2 cols × 1 row ≈ square due to cell aspect)
-    // For NES 256x240 with 8:7 PAR, display aspect ratio ≈ 1.219:1
-    // With square emojis: width / height = 1.219
-    // width = height * 256 * 8 / (240 * 7) = height * 2048/1680 ≈ height * 1.219
+    // width / height = displayAspect
     let height = availableRows;
-    let width = Math.floor(height * 2048 / 1680);
+    let width = Math.floor(height * displayAspect);
     const displayCols = width * 2; // Actual terminal columns needed
 
     if (displayCols > termCols) {
       width = Math.floor(termCols / 2);
-      height = Math.floor(width * 1680 / 2048);
+      height = Math.floor(width / displayAspect);
     }
 
     return { width, height };
   } else if (mode === 'ascii') {
     // ASCII: 1 char = 1 pixel
-    // Maintain ~4:3 display aspect ratio accounting for cell aspect
-    // cols / (rows * 2) = 4/3 => cols = rows * 8/3
+    // To maintain display aspect, account for cell aspect ratio
+    // displayAspect = (cols * cellWidth) / (rows * cellHeight)
+    // displayAspect = cols / (rows * 2) => cols = rows * 2 * displayAspect
     let height = availableRows;
-    let width = Math.floor(height * 8 / 3);
+    let width = Math.floor(height * 2 * displayAspect);
 
     if (width > termCols) {
       width = termCols;
-      height = Math.floor(width * 3 / 8);
+      height = Math.floor(width / (2 * displayAspect));
     }
 
     return { width, height };
   } else {
-    // Terminal half-block mode: 1 char = 1x2 NES pixels
-    // Terminal cells are ~1:2 aspect (twice as tall as wide)
-    // Display aspect = width / (height * 2) = 4/3 => width = height * 8/3
+    // Terminal half-block mode: 1 char = 1x2 pixels
+    // Each half-block character covers 2 vertical pixels
+    // displayAspect = (cols * cellWidth) / ((rows * 2) * cellHeight)
+    // With cellAspect = 0.5: displayAspect = cols / (rows * 4)
+    // But half-blocks double vertical resolution: cols = rows * 2 * displayAspect
     let height = availableRows;
-    let width = Math.floor(height * 8 / 3);
+    let width = Math.floor(height * 2 * displayAspect);
 
     if (width > termCols) {
       width = termCols;
-      height = Math.floor(width * 3 / 8);
+      height = Math.floor(width / (2 * displayAspect));
     }
 
     return { width, height };
@@ -169,7 +179,7 @@ export class Emulator {
       const explicitDims = options.width && options.height;
       const dims = explicitDims
         ? { width: options.width!, height: options.height! }
-        : calculateTerminalDimensions('emoji');
+        : calculateTerminalDimensions('emoji', this.systemInfo.width, this.systemInfo.height, this.systemInfo.pixelAspectRatio);
       this.autoResize = !explicitDims;
       this.renderer = new TerminalRenderer({
         width: dims.width,
@@ -184,7 +194,7 @@ export class Emulator {
       const explicitDims = options.width && options.height;
       const dims = explicitDims
         ? { width: options.width!, height: options.height! }
-        : calculateTerminalDimensions('ascii');
+        : calculateTerminalDimensions('ascii', this.systemInfo.width, this.systemInfo.height, this.systemInfo.pixelAspectRatio);
       this.autoResize = !explicitDims;
       this.renderer = new TerminalRenderer({
         width: dims.width,
@@ -199,7 +209,7 @@ export class Emulator {
       const explicitDims = options.width && options.height;
       const dims = explicitDims
         ? { width: options.width!, height: options.height! }
-        : calculateTerminalDimensions('terminal');
+        : calculateTerminalDimensions('terminal', this.systemInfo.width, this.systemInfo.height, this.systemInfo.pixelAspectRatio);
       this.autoResize = !explicitDims;
       this.renderer = new TerminalRenderer({
         width: dims.width,
@@ -281,11 +291,11 @@ export class Emulator {
 
     // Convert framebuffer based on color space
     if (this.systemInfo.colorSpace === 'rgb15') {
-      // Use native RGB15 rendering for Kitty, convert for other renderers
-      if (this.renderMode === 'kitty') {
-        return (this.renderer as KittyRenderer).renderRgb15(framebuffer as Uint16Array);
+      // Use native RGB15 rendering for all renderers that support it
+      if (this.renderer.renderRgb15) {
+        return this.renderer.renderRgb15(framebuffer as Uint16Array);
       } else {
-        // Convert RGB15 to palette indices for terminal renderer
+        // Fallback: Convert RGB15 to palette indices (grayscale)
         return this.renderer.render(this.convertRgb15ToPalette(framebuffer as Uint16Array));
       }
     } else {
@@ -294,10 +304,9 @@ export class Emulator {
     }
   }
 
-  // Convert RGB15 framebuffer to 8-bit indexed for terminal rendering
+  // Convert RGB15 framebuffer to 8-bit indexed for terminal rendering (fallback)
   private convertRgb15ToPalette(rgb15: Uint16Array): Uint8Array {
-    // Create a grayscale-ish approximation for terminal rendering
-    // This is a simplified conversion - proper rendering would need RGB support
+    // Create a grayscale approximation for renderers that don't support RGB15
     const width = this.systemInfo.width;
     const height = this.systemInfo.height;
     const output = new Uint8Array(width * height);
@@ -354,7 +363,7 @@ export class Emulator {
           (this.renderer as KittyRenderer).setDimensions();
         } else {
           const mode = this.renderMode === 'emoji' ? 'emoji' : this.renderMode === 'ascii' ? 'ascii' : 'terminal';
-          const dims = calculateTerminalDimensions(mode);
+          const dims = calculateTerminalDimensions(mode, this.systemInfo.width, this.systemInfo.height, this.systemInfo.pixelAspectRatio);
           (this.renderer as TerminalRenderer).setDimensions(dims.width, dims.height);
         }
         process.stdout.write(this.renderer.clearScreen());
@@ -627,7 +636,7 @@ export class Emulator {
       });
       this.autoResize = true;
     } else if (nextMode === 'emoji') {
-      const dims = calculateTerminalDimensions('emoji');
+      const dims = calculateTerminalDimensions('emoji', this.systemInfo.width, this.systemInfo.height, this.systemInfo.pixelAspectRatio);
       this.renderer = new TerminalRenderer({
         width: dims.width,
         height: dims.height,
@@ -638,7 +647,7 @@ export class Emulator {
       });
       this.autoResize = true;
     } else if (nextMode === 'ascii') {
-      const dims = calculateTerminalDimensions('ascii');
+      const dims = calculateTerminalDimensions('ascii', this.systemInfo.width, this.systemInfo.height, this.systemInfo.pixelAspectRatio);
       this.renderer = new TerminalRenderer({
         width: dims.width,
         height: dims.height,
@@ -649,7 +658,7 @@ export class Emulator {
       });
       this.autoResize = true;
     } else {
-      const dims = calculateTerminalDimensions('terminal');
+      const dims = calculateTerminalDimensions('terminal', this.systemInfo.width, this.systemInfo.height, this.systemInfo.pixelAspectRatio);
       this.renderer = new TerminalRenderer({
         width: dims.width,
         height: dims.height,
