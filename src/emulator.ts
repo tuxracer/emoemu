@@ -784,12 +784,20 @@ export class Emulator {
   }
 
   /**
-   * Prompt user for confirmation with keyboard (y/N) and gamepad (A=yes, B=no) support
+   * Prompt user for confirmation with keyboard and gamepad (A=yes, B=no) support
+   * @param message The question to ask
+   * @param defaultYes If true, default is Y. If false, default is N.
    * @returns Promise that resolves to true if user confirms, false otherwise
    */
-  private promptConfirmation(message: string): Promise<boolean> {
+  private promptConfirmation(message: string, defaultYes: boolean = false): Promise<boolean> {
     return new Promise((resolve) => {
-      process.stdout.write(`${message} (y/N, or A/B on gamepad): `);
+      // Check if gamepad is available
+      const hasGamepad = this.gamepadManager !== null;
+
+      // Build prompt with appropriate default and gamepad hint
+      const defaultHint = defaultYes ? '[Y/n]' : '[y/N]';
+      const gamepadHint = hasGamepad ? ', A/B' : '';
+      process.stdout.write(`${message} (${defaultHint}${gamepadHint}): `);
 
       // Set up keyboard input
       const wasRaw = process.stdin.isRaw;
@@ -797,14 +805,16 @@ export class Emulator {
       process.stdin.resume();
 
       let resolved = false;
+      let gamepadInterval: ReturnType<typeof setInterval> | null = null;
+
       const cleanup = () => {
         if (resolved) return;
         resolved = true;
         process.stdin.setRawMode(wasRaw ?? false);
         process.stdin.pause();
         process.stdin.removeListener('data', onKeyPress);
-        if (this.gamepadManager) {
-          this.gamepadManager.stop();
+        if (gamepadInterval) {
+          clearInterval(gamepadInterval);
         }
         console.log(); // New line after prompt
       };
@@ -814,8 +824,15 @@ export class Emulator {
         if (key === 'y') {
           cleanup();
           resolve(true);
-        } else if (key === 'n' || key === '\r' || key === '\n' || key === '\x1b') {
-          // n, Enter, or Escape = No
+        } else if (key === 'n') {
+          cleanup();
+          resolve(false);
+        } else if (key === '\r' || key === '\n') {
+          // Enter = use default
+          cleanup();
+          resolve(defaultYes);
+        } else if (key === '\x1b') {
+          // Escape = no
           cleanup();
           resolve(false);
         }
@@ -824,22 +841,20 @@ export class Emulator {
       process.stdin.on('data', onKeyPress);
 
       // Set up gamepad input if available
-      if (this.gamepadManager) {
-        // Temporarily hijack controller to detect A/B presses
-        const checkGamepad = setInterval(() => {
+      if (hasGamepad) {
+        gamepadInterval = setInterval(() => {
           if (resolved) {
-            clearInterval(checkGamepad);
             return;
           }
           // Check if A is pressed (confirm)
           if (this.controller1.getButton(Button.A)) {
-            clearInterval(checkGamepad);
+            console.log('A'); // Echo the selection
             cleanup();
             resolve(true);
           }
           // Check if B is pressed (cancel)
           if (this.controller1.getButton(Button.B)) {
-            clearInterval(checkGamepad);
+            console.log('B'); // Echo the selection
             cleanup();
             resolve(false);
           }

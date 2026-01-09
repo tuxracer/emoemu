@@ -38,13 +38,16 @@ function validateStateFile(statePath: string): SaveState | null {
 }
 
 /**
- * Prompt the user with a yes/no question (defaults to yes on empty input)
+ * Prompt the user with a yes/no question
  * Supports both keyboard input and gamepad A/B buttons
+ * @param question The question to ask
+ * @param defaultYes If true, default is Y (empty input = yes). If false, default is N (empty input = no)
  */
-function askYesNo(question: string): Promise<boolean> {
+function askYesNo(question: string, defaultYes: boolean = true): Promise<boolean> {
   return new Promise((resolve) => {
     let resolved = false;
     let gamepadDevice: HID.HID | null = null;
+    let hasGamepad = false;
 
     const cleanup = () => {
       if (gamepadDevice) {
@@ -65,26 +68,14 @@ function askYesNo(question: string): Promise<boolean> {
       resolve(result);
     };
 
-    // Set up keyboard input
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    rl.question(`${question} [Y/n]: `, (answer) => {
-      const trimmed = answer.trim().toLowerCase();
-      // Default to yes if empty, otherwise check for explicit no
-      finish(trimmed !== 'n' && trimmed !== 'no');
-    });
-
-    // Try to set up gamepad input
+    // Try to detect gamepad first (before showing prompt)
     try {
       const devices = HID.devices();
       const gamepadDevices = devices.filter(isGamepadDevice);
-
       const deviceInfo = gamepadDevices.find(d => d.path);
       if (deviceInfo?.path) {
         gamepadDevice = new HID.HID(deviceInfo.path as string);
+        hasGamepad = true;
         const profile = findProfile(deviceInfo.vendorId ?? 0, deviceInfo.productId ?? 0);
 
         gamepadDevice.on('data', (data: Buffer) => {
@@ -114,6 +105,28 @@ function askYesNo(question: string): Promise<boolean> {
     } catch {
       // Gamepad setup failed - keyboard only
     }
+
+    // Set up keyboard input
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    // Build prompt with appropriate default and gamepad hint
+    const defaultHint = defaultYes ? '[Y/n]' : '[y/N]';
+    const gamepadHint = hasGamepad ? ', A/B' : '';
+    const prompt = `${question} (${defaultHint}${gamepadHint}): `;
+
+    rl.question(prompt, (answer) => {
+      const trimmed = answer.trim().toLowerCase();
+      if (trimmed === '') {
+        // Empty input = use default
+        finish(defaultYes);
+      } else {
+        // Explicit input
+        finish(trimmed === 'y' || trimmed === 'yes');
+      }
+    });
   });
 }
 
