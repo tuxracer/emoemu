@@ -393,9 +393,13 @@ export class Emulator {
     // Buffer size in bytes (16-bit stereo = 4 bytes per sample frame)
     const frameBytes = frameSize * 2 * 2; // frameSize * 2 channels * 2 bytes
 
-    // Sample accumulator buffer (float samples waiting to be written)
-    let sampleBuffer = new Float32Array(frameSize * 2); // Double size for safety
-    let sampleBufferPos = 0;
+    // Fixed-size ring buffer for sample accumulation (prevents unbounded growth)
+    // Size: enough for ~100ms of audio (5 frames worth)
+    const ringBufferSize = frameSize * 5;
+    const ringBuffer = new Float32Array(ringBufferSize);
+    let ringWritePos = 0;
+    let ringReadPos = 0;
+    let ringCount = 0; // Number of samples in buffer
 
     // Pre-allocated output buffer for RtAudio (exact frame size required)
     const outputBuffer = Buffer.alloc(frameBytes);
@@ -446,16 +450,18 @@ export class Emulator {
 
       this.rtAudio.start();
       // Reset state on audio recreation
-      sampleBufferPos = 0;
+      ringWritePos = 0;
+      ringReadPos = 0;
+      ringCount = 0;
       framesWritten = 0;
       framesPlayed = 0;
     };
 
     createAudio();
 
-    // Helper to write a single frame to RtAudio
+    // Helper to write a single frame to RtAudio from ring buffer
     const writeFrame = (): boolean => {
-      if (!this.rtAudio || sampleBufferPos < frameSize) return false;
+      if (!this.rtAudio || ringCount < frameSize) return false;
 
       // Flow control: don't queue too many frames ahead
       const queuedFrames = framesWritten - framesPlayed;
@@ -464,30 +470,25 @@ export class Emulator {
       }
 
       // Convert float samples to int16 stereo in output buffer
-      // Duplicate mono sample to both left and right channels
+      // Read from ring buffer, duplicate mono to both channels
       for (let i = 0; i < frameSize; i++) {
-        const sample = Math.max(-1, Math.min(1, sampleBuffer[i]));
+        const sample = Math.max(-1, Math.min(1, ringBuffer[ringReadPos]));
         const int16 = (sample * 32767) | 0;
         const offset = i * 4; // 4 bytes per stereo sample (2 channels * 2 bytes)
         outputBuffer.writeInt16LE(int16, offset);     // Left channel
         outputBuffer.writeInt16LE(int16, offset + 2); // Right channel
+        ringReadPos = (ringReadPos + 1) % ringBufferSize;
       }
+      ringCount -= frameSize;
 
       this.rtAudio.write(outputBuffer);
       framesWritten++;
-
-      // Shift remaining samples to front of buffer
-      const remaining = sampleBufferPos - frameSize;
-      if (remaining > 0) {
-        sampleBuffer.copyWithin(0, frameSize, sampleBufferPos);
-      }
-      sampleBufferPos = remaining;
       return true;
     };
 
     // Try to write all available frames to RtAudio's queue
     tryWriteFrames = () => {
-      while (sampleBufferPos >= frameSize && writeFrame()) {
+      while (ringCount >= frameSize && writeFrame()) {
         // Keep writing until buffer is drained or queue is full
       }
     };
@@ -496,16 +497,18 @@ export class Emulator {
     this.apu.onSamplesReady = (samples: Float32Array) => {
       if (!this.rtAudio || !this.audioEnabled) return;
 
-      // Add incoming samples to buffer
-      // Expand buffer if needed
-      if (sampleBufferPos + samples.length > sampleBuffer.length) {
-        const newBuffer = new Float32Array(sampleBuffer.length * 2);
-        newBuffer.set(sampleBuffer);
-        sampleBuffer = newBuffer;
+      // Add incoming samples to ring buffer
+      for (let i = 0; i < samples.length; i++) {
+        // If buffer is full, overwrite oldest samples (drop audio rather than grow)
+        if (ringCount >= ringBufferSize) {
+          // Advance read pointer to drop oldest sample
+          ringReadPos = (ringReadPos + 1) % ringBufferSize;
+          ringCount--;
+        }
+        ringBuffer[ringWritePos] = samples[i];
+        ringWritePos = (ringWritePos + 1) % ringBufferSize;
+        ringCount++;
       }
-
-      sampleBuffer.set(samples, sampleBufferPos);
-      sampleBufferPos += samples.length;
 
       // Write complete frames to RtAudio's queue
       tryWriteFrames();

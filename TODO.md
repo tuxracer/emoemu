@@ -90,7 +90,7 @@
 ### Audio Architecture Improvements
 - [x] Use `frameOutputCallback` for flow control (replace manual timing sync)
 - [x] Leverage RtAudio's internal queue (write smaller chunks more frequently)
-- [ ] Fixed-size ring buffer (prevent unbounded memory growth)
+- [x] Fixed-size ring buffer (prevent unbounded memory growth)
 - [ ] Higher sample rate (44100 Hz for better quality)
 - [ ] Error callback for graceful error recovery
 - [ ] Smaller frame size (10ms or 5ms for lower latency)
