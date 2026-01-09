@@ -131,6 +131,7 @@ export class Emulator {
   private lastFrameTime: number = 0;
   private targetFrameTime: number = 1000 / 60; // ~16.67ms for 60 FPS
   private resizeHandler: (() => void) | null = null;
+  private inputHandler: ((key: string) => void) | null = null;
   private autoSaveInterval: ReturnType<typeof setInterval> | null = null;
   private static readonly AUTO_SAVE_INTERVAL_MS = 30000; // 30 seconds (only saves if SRAM was modified)
   // Pre-allocated audio buffer pool to avoid allocation per sample batch
@@ -559,7 +560,7 @@ export class Emulator {
   }
 
   private setupInputHandler(): void {
-    process.stdin.on('data', (key: string) => {
+    this.inputHandler = (key: string) => {
       // Process input through InputManager
       const result = this.inputManager.processInput(key);
 
@@ -570,7 +571,8 @@ export class Emulator {
       if (result.cycleRenderMode) {
         this.cycleRenderMode();
       }
-    });
+    };
+    process.stdin.on('data', this.inputHandler);
   }
 
   // Cycle through render modes: kitty -> terminal -> ascii -> emoji -> kitty
@@ -684,6 +686,12 @@ export class Emulator {
       this.rtAudio = null;
     }
 
+    // Remove stdin data listener
+    if (this.inputHandler) {
+      process.stdin.off('data', this.inputHandler);
+      this.inputHandler = null;
+    }
+
     // Stop global keyboard listener
     this.inputManager.stop();
 
@@ -704,6 +712,9 @@ export class Emulator {
     process.stdin.pause();
 
     console.log(`Emulation stopped. Total frames: ${this.frameCount}`);
+
+    // Force exit - native audio module may keep handles open
+    process.exit(0);
   }
 
   // Expose controller for external input handling
