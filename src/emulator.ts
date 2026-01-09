@@ -12,20 +12,6 @@ import { KittyRenderer } from './ppu/kitty-renderer.js';
 import { APU, APUState } from './apu/apu.js';
 import Speaker from 'speaker';
 
-// Suppress native audio library warnings (buffer underflow messages from CoreAudio/mpg123)
-// Must be set up before any audio playback begins
-const originalStderrWrite = process.stderr.write.bind(process.stderr);
-process.stderr.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
-  const str = typeof chunk === 'string' ? chunk : chunk.toString();
-  if (str.includes('buffer underflow') ||
-      str.includes('coreaudio') ||
-      str.includes('mpg123') ||
-      str.includes("Didn't have any audio data")) {
-    return true;
-  }
-  return originalStderrWrite(chunk, ...args);
-}) as typeof process.stderr.write;
-
 export interface SaveState {
   version: number;
   romPath: string;
