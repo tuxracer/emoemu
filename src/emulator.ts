@@ -158,6 +158,9 @@ export class Emulator {
     if (this.renderMode === 'kitty') {
       this.renderer = new KittyRenderer({
         scale: options.scale,  // undefined = auto-fit to terminal
+        sourceWidth: this.systemInfo.width,
+        sourceHeight: this.systemInfo.height,
+        colorSpace: this.systemInfo.colorSpace === 'rgb15' ? 'rgb15' : 'indexed',
       });
       // Enable auto-resize when no explicit scale is provided
       this.autoResize = options.scale === undefined;
@@ -173,6 +176,8 @@ export class Emulator {
         height: dims.height,
         useColor: false,
         emojiMode: true,
+        sourceWidth: this.systemInfo.width,
+        sourceHeight: this.systemInfo.height,
       });
     } else if (this.renderMode === 'ascii') {
       // Auto-size to terminal if no explicit dimensions given
@@ -186,6 +191,8 @@ export class Emulator {
         height: dims.height,
         useColor: options.useColor ?? true,
         asciiMode: true,
+        sourceWidth: this.systemInfo.width,
+        sourceHeight: this.systemInfo.height,
       });
     } else {
       // Auto-size to terminal if no explicit dimensions given
@@ -198,6 +205,8 @@ export class Emulator {
         width: dims.width,
         height: dims.height,
         useColor: options.useColor ?? true,
+        sourceWidth: this.systemInfo.width,
+        sourceHeight: this.systemInfo.height,
       });
     }
   }
@@ -272,9 +281,13 @@ export class Emulator {
 
     // Convert framebuffer based on color space
     if (this.systemInfo.colorSpace === 'rgb15') {
-      // GBA uses 15-bit RGB - convert to palette indices for renderer
-      // For now, render as-is (renderer will need to be updated to handle rgb15)
-      return this.renderer.render(this.convertRgb15ToPalette(framebuffer as Uint16Array));
+      // Use native RGB15 rendering for Kitty, convert for other renderers
+      if (this.renderMode === 'kitty') {
+        return (this.renderer as KittyRenderer).renderRgb15(framebuffer as Uint16Array);
+      } else {
+        // Convert RGB15 to palette indices for terminal renderer
+        return this.renderer.render(this.convertRgb15ToPalette(framebuffer as Uint16Array));
+      }
     } else {
       // NES uses palette indices
       return this.renderer.render(framebuffer as Uint8Array);
@@ -607,7 +620,11 @@ export class Emulator {
 
     // Create new renderer based on mode
     if (nextMode === 'kitty') {
-      this.renderer = new KittyRenderer();
+      this.renderer = new KittyRenderer({
+        sourceWidth: this.systemInfo.width,
+        sourceHeight: this.systemInfo.height,
+        colorSpace: this.systemInfo.colorSpace === 'rgb15' ? 'rgb15' : 'indexed',
+      });
       this.autoResize = true;
     } else if (nextMode === 'emoji') {
       const dims = calculateTerminalDimensions('emoji');
@@ -616,6 +633,8 @@ export class Emulator {
         height: dims.height,
         useColor: false,
         emojiMode: true,
+        sourceWidth: this.systemInfo.width,
+        sourceHeight: this.systemInfo.height,
       });
       this.autoResize = true;
     } else if (nextMode === 'ascii') {
@@ -625,6 +644,8 @@ export class Emulator {
         height: dims.height,
         useColor: true,
         asciiMode: true,
+        sourceWidth: this.systemInfo.width,
+        sourceHeight: this.systemInfo.height,
       });
       this.autoResize = true;
     } else {
@@ -633,6 +654,8 @@ export class Emulator {
         width: dims.width,
         height: dims.height,
         useColor: true,
+        sourceWidth: this.systemInfo.width,
+        sourceHeight: this.systemInfo.height,
       });
       this.autoResize = true;
     }

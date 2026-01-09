@@ -45,11 +45,14 @@ function createPngChunk(type: string, data: Buffer): Buffer {
   return chunk;
 }
 
-// NES native resolution 256x240 with 8:7 pixel aspect ratio (PAR)
+// Default to NES native resolution 256x240 with 8:7 pixel aspect ratio (PAR)
 // Display aspect ratio ≈ 1.219:1 when PAR-corrected
 
 export interface KittyRendererOptions {
   scale?: number;  // Scale factor for the image (undefined = auto-fit to terminal)
+  sourceWidth?: number;   // Source framebuffer width (default: 256)
+  sourceHeight?: number;  // Source framebuffer height (default: 240)
+  colorSpace?: 'indexed' | 'rgb15';  // Color format (default: indexed/NES palette)
 }
 
 // Typical terminal cell pixel dimensions (width x height)
@@ -66,19 +69,34 @@ export class KittyRenderer {
   private displayRows: number;
   private offsetCol: number = 1;  // Horizontal offset for centering
   private offsetRow: number = 1;  // Vertical offset for centering
-  // Scaled image dimensions in pixels (integer multiple of NES resolution)
-  private scaledWidth: number = NES_WIDTH;
-  private scaledHeight: number = NES_HEIGHT;
+  // Source framebuffer dimensions
+  private sourceWidth: number;
+  private sourceHeight: number;
+  // Scaled image dimensions in pixels (integer multiple of source resolution)
+  private scaledWidth: number;
+  private scaledHeight: number;
   // Pre-allocated RGB buffer for scaled output
   private scaledRgbBuffer!: Uint8Array;
   // Pre-allocated row buffer for horizontal scaling
   private scaledRowBuffer!: Uint8Array;
   // Previous frame buffer for row-level memoization (skip unchanged rows)
-  private prevFrameBuffer: Uint8Array = new Uint8Array(NES_WIDTH * NES_HEIGHT);
+  // For indexed: Uint8Array (1 byte per pixel)
+  // For rgb15: Uint16Array (2 bytes per pixel)
+  private prevFrameBuffer: Uint8Array | Uint16Array;
   // Cached PNG data from last encode
   private pngBuffer: Buffer = Buffer.alloc(0);
+  // Color space for framebuffer interpretation
+  private colorSpace: 'indexed' | 'rgb15';
 
   constructor(options: KittyRendererOptions = {}) {
+    this.sourceWidth = options.sourceWidth ?? NES_WIDTH;
+    this.sourceHeight = options.sourceHeight ?? NES_HEIGHT;
+    this.colorSpace = options.colorSpace ?? 'indexed';
+    // Allocate prevFrameBuffer based on color space
+    const pixelCount = this.sourceWidth * this.sourceHeight;
+    this.prevFrameBuffer = this.colorSpace === 'rgb15'
+      ? new Uint16Array(pixelCount)
+      : new Uint8Array(pixelCount);
     this.autoScale = options.scale === undefined;
 
     if (this.autoScale) {
@@ -89,12 +107,12 @@ export class KittyRenderer {
       this.displayRows = rows;
       this.offsetCol = offsetCol;
       this.offsetRow = offsetRow;
-      this.scaledWidth = NES_WIDTH * integerScale;
-      this.scaledHeight = NES_HEIGHT * integerScale;
+      this.scaledWidth = this.sourceWidth * integerScale;
+      this.scaledHeight = this.sourceHeight * integerScale;
     } else {
       this.integerScale = Math.max(1, Math.round(options.scale!));
-      this.scaledWidth = NES_WIDTH * this.integerScale;
-      this.scaledHeight = NES_HEIGHT * this.integerScale;
+      this.scaledWidth = this.sourceWidth * this.integerScale;
+      this.scaledHeight = this.sourceHeight * this.integerScale;
       // Calculate display cells from pixel size
       this.displayCols = Math.ceil(this.scaledWidth / CELL_WIDTH_PX);
       this.displayRows = Math.ceil(this.scaledHeight / CELL_HEIGHT_PX);
@@ -128,14 +146,17 @@ export class KittyRenderer {
     const availableRows = termRows - 2;
     const availableCols = termCols;
 
-    // Calculate display size in cells to fill terminal (same as original algorithm)
-    // NES with 8:7 PAR: cols = rows * 256/105 ≈ rows * 2.438
+    // Calculate display size in cells to fill terminal
+    // Formula: cols = rows * (sourceWidth * PAR) / sourceHeight * (cellHeight / cellWidth)
+    // For NES (256x240, 8:7 PAR): cols ≈ rows * 2.438
+    // For GBC (160x144, 1:1 PAR): cols ≈ rows * 2.222
     let displayRows = availableRows;
-    let displayCols = Math.floor(displayRows * 256 / 105);
+    const aspectRatio = (this.sourceWidth * CELL_HEIGHT_PX) / (this.sourceHeight * CELL_WIDTH_PX);
+    let displayCols = Math.floor(displayRows * aspectRatio);
 
     if (displayCols > availableCols) {
       displayCols = availableCols;
-      displayRows = Math.floor(displayCols * 105 / 256);
+      displayRows = Math.floor(displayCols / aspectRatio);
     }
 
     displayCols = Math.max(displayCols, 32);
@@ -147,7 +168,7 @@ export class KittyRenderer {
 
     // Find nearest integer scale (round, not floor) for crisp pre-scaling
     // Kitty will handle the small remaining scale adjustment
-    const idealScale = Math.min(displayWidthPx / NES_WIDTH, displayHeightPx / NES_HEIGHT);
+    const idealScale = Math.min(displayWidthPx / this.sourceWidth, displayHeightPx / this.sourceHeight);
     const integerScale = Math.max(1, Math.round(idealScale));
 
     // Calculate centering offsets (1-based for ANSI escape sequences)
@@ -181,8 +202,8 @@ export class KittyRenderer {
       this.offsetCol = offsetCol;
       this.offsetRow = offsetRow;
       // Recalculate scaled dimensions if scale changed
-      const newWidth = NES_WIDTH * integerScale;
-      const newHeight = NES_HEIGHT * integerScale;
+      const newWidth = this.sourceWidth * integerScale;
+      const newHeight = this.sourceHeight * integerScale;
       if (newWidth !== this.scaledWidth || newHeight !== this.scaledHeight) {
         this.integerScale = integerScale;
         this.scaledWidth = newWidth;
@@ -196,22 +217,22 @@ export class KittyRenderer {
     }
   }
 
-  // Convert NES frame buffer to scaled RGB using fast integer scaling
+  // Convert indexed (palette-based) frame buffer to scaled RGB
   // Uses row-level memoization to skip unchanged rows
-  private frameToRgbScaled(frameBuffer: Uint8Array): void {
+  private frameToRgbScaledIndexed(frameBuffer: Uint8Array): void {
     const palette = nesPaletteFlat;
     const dst = this.scaledRgbBuffer;
     const scale = this.integerScale;
     const scaledRowBytes = this.scaledWidth * 3;
     const rowBuffer = this.scaledRowBuffer;
-    const prevFrame = this.prevFrameBuffer;
+    const prevFrame = this.prevFrameBuffer as Uint8Array;
 
-    for (let srcY = 0; srcY < NES_HEIGHT; srcY++) {
-      const srcRowStart = srcY * NES_WIDTH;
+    for (let srcY = 0; srcY < this.sourceHeight; srcY++) {
+      const srcRowStart = srcY * this.sourceWidth;
 
       // Check if this row changed from previous frame
       let rowChanged = false;
-      for (let x = 0; x < NES_WIDTH; x++) {
+      for (let x = 0; x < this.sourceWidth; x++) {
         if (frameBuffer[srcRowStart + x] !== prevFrame[srcRowStart + x]) {
           rowChanged = true;
           break;
@@ -223,7 +244,7 @@ export class KittyRenderer {
 
       // Scale one source row horizontally into rowBuffer
       let rowIdx = 0;
-      for (let srcX = 0; srcX < NES_WIDTH; srcX++) {
+      for (let srcX = 0; srcX < this.sourceWidth; srcX++) {
         const paletteIdx = (frameBuffer[srcRowStart + srcX] & 0x3f) * 3;
         const r = palette[paletteIdx];
         const g = palette[paletteIdx + 1];
@@ -239,6 +260,59 @@ export class KittyRenderer {
       }
 
       // Copy the scaled row 'scale' times vertically using TypedArray.set()
+      const dstRowStart = srcY * scale * scaledRowBytes;
+      for (let sy = 0; sy < scale; sy++) {
+        dst.set(rowBuffer, dstRowStart + sy * scaledRowBytes);
+      }
+    }
+
+    // Store current frame for next comparison
+    prevFrame.set(frameBuffer);
+  }
+
+  // Convert RGB15 frame buffer to scaled RGB24
+  // RGB15 format: XBBBBBGGGGGRRRRR (5 bits per channel, X is unused)
+  private frameToRgbScaledRgb15(frameBuffer: Uint16Array): void {
+    const dst = this.scaledRgbBuffer;
+    const scale = this.integerScale;
+    const scaledRowBytes = this.scaledWidth * 3;
+    const rowBuffer = this.scaledRowBuffer;
+    const prevFrame = this.prevFrameBuffer as Uint16Array;
+
+    for (let srcY = 0; srcY < this.sourceHeight; srcY++) {
+      const srcRowStart = srcY * this.sourceWidth;
+
+      // Check if this row changed from previous frame
+      let rowChanged = false;
+      for (let x = 0; x < this.sourceWidth; x++) {
+        if (frameBuffer[srcRowStart + x] !== prevFrame[srcRowStart + x]) {
+          rowChanged = true;
+          break;
+        }
+      }
+
+      // Skip scaling if row unchanged
+      if (!rowChanged) continue;
+
+      // Scale one source row horizontally into rowBuffer
+      let rowIdx = 0;
+      for (let srcX = 0; srcX < this.sourceWidth; srcX++) {
+        const color = frameBuffer[srcRowStart + srcX];
+        // Extract RGB15 components (5 bits each) and expand to 8 bits
+        const r = ((color & 0x001F) << 3) | ((color & 0x001F) >> 2);
+        const g = (((color >> 5) & 0x1F) << 3) | (((color >> 5) & 0x1F) >> 2);
+        const b = (((color >> 10) & 0x1F) << 3) | (((color >> 10) & 0x1F) >> 2);
+
+        // Write pixel 'scale' times horizontally
+        for (let sx = 0; sx < scale; sx++) {
+          rowBuffer[rowIdx] = r;
+          rowBuffer[rowIdx + 1] = g;
+          rowBuffer[rowIdx + 2] = b;
+          rowIdx += 3;
+        }
+      }
+
+      // Copy the scaled row 'scale' times vertically
       const dstRowStart = srcY * scale * scaledRowBytes;
       for (let sy = 0; sy < scale; sy++) {
         dst.set(rowBuffer, dstRowStart + sy * scaledRowBytes);
@@ -344,9 +418,9 @@ export class KittyRenderer {
     return chunks.join('');
   }
 
-  // Check if entire frame is unchanged from previous
-  private isFrameUnchanged(frameBuffer: Uint8Array): boolean {
-    const prev = this.prevFrameBuffer;
+  // Check if entire frame is unchanged from previous (for indexed/Uint8Array)
+  private isFrameUnchangedIndexed(frameBuffer: Uint8Array): boolean {
+    const prev = this.prevFrameBuffer as Uint8Array;
     const len = frameBuffer.length;
     for (let i = 0; i < len; i++) {
       if (frameBuffer[i] !== prev[i]) return false;
@@ -354,16 +428,47 @@ export class KittyRenderer {
     return true;
   }
 
-  // Render frame buffer to Kitty graphics
+  // Check if entire frame is unchanged from previous (for rgb15/Uint16Array)
+  private isFrameUnchangedRgb15(frameBuffer: Uint16Array): boolean {
+    const prev = this.prevFrameBuffer as Uint16Array;
+    const len = frameBuffer.length;
+    for (let i = 0; i < len; i++) {
+      if (frameBuffer[i] !== prev[i]) return false;
+    }
+    return true;
+  }
+
+  // Render indexed (palette-based) frame buffer to Kitty graphics
   render(frameBuffer: Uint8Array): string {
     // Skip entirely if frame unchanged (after first frame)
-    if (this.frameNumber > 0 && this.isFrameUnchanged(frameBuffer)) {
+    if (this.frameNumber > 0 && this.isFrameUnchangedIndexed(frameBuffer)) {
       return '';
     }
 
     // Convert frame to scaled RGB using nearest-neighbor interpolation
-    // This produces crisp pixels without Kitty's bilinear blur
-    this.frameToRgbScaled(frameBuffer);
+    this.frameToRgbScaledIndexed(frameBuffer);
+
+    // Build output
+    let output = '';
+
+    // Move cursor to centered position for image placement
+    output += `${ESC}[${this.offsetRow};${this.offsetCol}H`;
+
+    // Send PNG-compressed image
+    output += this.sendImage();
+
+    return output;
+  }
+
+  // Render RGB15 frame buffer to Kitty graphics
+  renderRgb15(frameBuffer: Uint16Array): string {
+    // Skip entirely if frame unchanged (after first frame)
+    if (this.frameNumber > 0 && this.isFrameUnchangedRgb15(frameBuffer)) {
+      return '';
+    }
+
+    // Convert RGB15 frame to scaled RGB24
+    this.frameToRgbScaledRgb15(frameBuffer);
 
     // Build output
     let output = '';

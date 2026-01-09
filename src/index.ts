@@ -1,23 +1,24 @@
 #!/usr/bin/env node
 
-import * as readline from 'readline';
-import { Emulator, RenderMode } from './emulator.js';
-import { GamepadManager } from './input/gamepad-manager.js';
-import HID from 'node-hid';
-import { existsSync, readFileSync } from 'fs';
-import { gunzipSync } from 'zlib';
-import type { SaveState } from './emulator.js';
-import { findProfile, isGamepadDevice } from './input/gamepad-profiles.js';
-import { Button } from './input/controller.js';
+import * as readline from "readline";
+import { Emulator, RenderMode } from "./emulator.js";
+import { GamepadManager } from "./input/gamepad-manager.js";
+import HID from "node-hid";
+import { existsSync, readFileSync } from "fs";
+import { gunzipSync } from "zlib";
+import type { SaveState } from "./emulator.js";
+import { findProfile, isGamepadDevice } from "./input/gamepad-profiles.js";
+import { Button } from "./input/controller.js";
 import {
   listCores,
   getSupportedExtensions,
   detectCoreFactory,
   getCoreFactory,
-} from './frontend/core-registry.js';
+} from "./frontend/core-registry.js";
 
 // Import NES core to register it with the registry
-import './cores/nes/index.js';
+import "./cores/nes/index.js";
+import "./cores/gbc/index.js";
 
 /**
  * Validate a state file and return the parsed state if valid
@@ -32,7 +33,9 @@ function validateStateFile(statePath: string): SaveState | null {
     const data = readFileSync(statePath);
     // Check for gzip magic number (0x1f 0x8b)
     const isGzipped = data[0] === 0x1f && data[1] === 0x8b;
-    const json = isGzipped ? gunzipSync(data).toString('utf-8') : data.toString('utf-8');
+    const json = isGzipped
+      ? gunzipSync(data).toString("utf-8")
+      : data.toString("utf-8");
     const state = JSON.parse(json) as SaveState;
 
     // Basic validation - check required fields exist
@@ -52,7 +55,10 @@ function validateStateFile(statePath: string): SaveState | null {
  * @param question The question to ask
  * @param defaultYes If true, default is Y (empty input = yes). If false, default is N (empty input = no)
  */
-function askYesNo(question: string, defaultYes: boolean = true): Promise<boolean> {
+function askYesNo(
+  question: string,
+  defaultYes: boolean = true
+): Promise<boolean> {
   return new Promise((resolve) => {
     let resolved = false;
     let gamepadDevice: HID.HID | null = null;
@@ -81,13 +87,16 @@ function askYesNo(question: string, defaultYes: boolean = true): Promise<boolean
     try {
       const devices = HID.devices();
       const gamepadDevices = devices.filter(isGamepadDevice);
-      const deviceInfo = gamepadDevices.find(d => d.path);
+      const deviceInfo = gamepadDevices.find((d) => d.path);
       if (deviceInfo?.path) {
         gamepadDevice = new HID.HID(deviceInfo.path as string);
         hasGamepad = true;
-        const profile = findProfile(deviceInfo.vendorId ?? 0, deviceInfo.productId ?? 0);
+        const profile = findProfile(
+          deviceInfo.vendorId ?? 0,
+          deviceInfo.productId ?? 0
+        );
 
-        gamepadDevice.on('data', (data: Buffer) => {
+        gamepadDevice.on("data", (data: Buffer) => {
           if (resolved) return;
 
           try {
@@ -97,10 +106,10 @@ function askYesNo(question: string, defaultYes: boolean = true): Promise<boolean
             const startPressed = buttonStates.get(Button.Start) ?? false;
 
             if (aPressed || startPressed) {
-              console.log(aPressed ? 'A' : 'Start'); // Echo the selection
+              console.log(aPressed ? "A" : "Start"); // Echo the selection
               finish(true);
             } else if (bPressed) {
-              console.log('B'); // Echo the selection
+              console.log("B"); // Echo the selection
               finish(false);
             }
           } catch {
@@ -108,7 +117,7 @@ function askYesNo(question: string, defaultYes: boolean = true): Promise<boolean
           }
         });
 
-        gamepadDevice.on('error', () => {
+        gamepadDevice.on("error", () => {
           cleanup();
         });
       }
@@ -123,18 +132,18 @@ function askYesNo(question: string, defaultYes: boolean = true): Promise<boolean
     });
 
     // Build prompt with appropriate default and gamepad hint
-    const defaultHint = defaultYes ? '[Y/n]' : '[y/N]';
-    const gamepadHint = hasGamepad ? ', A/B' : '';
+    const defaultHint = defaultYes ? "[Y/n]" : "[y/N]";
+    const gamepadHint = hasGamepad ? ", A/B" : "";
     const prompt = `${question} (${defaultHint}${gamepadHint}): `;
 
     rl.question(prompt, (answer) => {
       const trimmed = answer.trim().toLowerCase();
-      if (trimmed === '') {
+      if (trimmed === "") {
         // Empty input = use default
         finish(defaultYes);
       } else {
         // Explicit input
-        finish(trimmed === 'y' || trimmed === 'yes');
+        finish(trimmed === "y" || trimmed === "yes");
       }
     });
   });
@@ -147,14 +156,14 @@ function askYesNo(question: string, defaultYes: boolean = true): Promise<boolean
 function getStatePath(romPath: string): string {
   // Get all supported extensions and create a regex pattern
   const extensions = getSupportedExtensions();
-  const extPattern = extensions.map(ext => ext.replace('.', '\\.')).join('|');
-  const regex = new RegExp(`(${extPattern})$`, 'i');
-  return romPath.replace(regex, '.state');
+  const extPattern = extensions.map((ext) => ext.replace(".", "\\.")).join("|");
+  const regex = new RegExp(`(${extPattern})$`, "i");
+  return romPath.replace(regex, ".state");
 }
 
 function printUsage(): void {
   // Get supported extensions from core registry
-  const extensions = getSupportedExtensions().join(', ');
+  const extensions = getSupportedExtensions().join(", ");
 
   console.log(`
 TUI-NES - Terminal Retro Emulator
@@ -215,11 +224,11 @@ function parseArgs(args: string[]): {
 } {
   const result = {
     romPath: undefined as string | undefined,
-    width: undefined as number | undefined,  // undefined = auto-fit
+    width: undefined as number | undefined, // undefined = auto-fit
     height: undefined as number | undefined, // undefined = auto-fit
     useColor: true,
-    renderMode: 'kitty' as RenderMode,
-    scale: undefined as number | undefined,  // undefined = auto-fit to terminal
+    renderMode: "kitty" as RenderMode,
+    scale: undefined as number | undefined, // undefined = auto-fit to terminal
     help: false,
     listGamepads: false,
     listCoresFlag: false,
@@ -233,39 +242,39 @@ function parseArgs(args: string[]): {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
 
-    if (arg === '--help' || arg === '-h') {
+    if (arg === "--help" || arg === "-h") {
       result.help = true;
-    } else if (arg === '--width' && args[i + 1]) {
+    } else if (arg === "--width" && args[i + 1]) {
       result.width = parseInt(args[++i], 10);
-    } else if (arg === '--height' && args[i + 1]) {
+    } else if (arg === "--height" && args[i + 1]) {
       result.height = parseInt(args[++i], 10);
-    } else if (arg === '--scale' && args[i + 1]) {
+    } else if (arg === "--scale" && args[i + 1]) {
       result.scale = parseInt(args[++i], 10);
-    } else if (arg === '--ascii') {
-      result.renderMode = 'ascii';
-    } else if (arg === '--emoji') {
-      result.renderMode = 'emoji';
-    } else if (arg === '--no-color') {
+    } else if (arg === "--ascii") {
+      result.renderMode = "ascii";
+    } else if (arg === "--emoji") {
+      result.renderMode = "emoji";
+    } else if (arg === "--no-color") {
       result.useColor = false;
-    } else if (arg === '--kitty') {
-      result.renderMode = 'kitty';
-    } else if (arg === '--terminal') {
-      result.renderMode = 'terminal';
-    } else if (arg === '--list-gamepads') {
+    } else if (arg === "--kitty") {
+      result.renderMode = "kitty";
+    } else if (arg === "--terminal") {
+      result.renderMode = "terminal";
+    } else if (arg === "--list-gamepads") {
       result.listGamepads = true;
-    } else if (arg === '--list-cores') {
+    } else if (arg === "--list-cores") {
       result.listCoresFlag = true;
-    } else if (arg === '--core' && args[i + 1]) {
+    } else if (arg === "--core" && args[i + 1]) {
       result.core = args[++i];
-    } else if (arg === '--no-gamepad') {
+    } else if (arg === "--no-gamepad") {
       result.enableGamepad = false;
-    } else if (arg === '--no-audio') {
+    } else if (arg === "--no-audio") {
       result.enableAudio = false;
-    } else if (arg === '--no-status') {
+    } else if (arg === "--no-status") {
       result.showStatusBar = false;
-    } else if (arg === '--debug-gamepad') {
+    } else if (arg === "--debug-gamepad") {
       result.debugGamepad = true;
-    } else if (!arg.startsWith('-')) {
+    } else if (!arg.startsWith("-")) {
       result.romPath = arg;
     }
   }
@@ -274,7 +283,10 @@ function parseArgs(args: string[]): {
 }
 
 // Calculate display size to fit terminal while maintaining NES aspect ratio
-function calculateDisplaySize(requestedWidth?: number, requestedHeight?: number): { width: number; height: number } {
+function calculateDisplaySize(
+  requestedWidth?: number,
+  requestedHeight?: number
+): { width: number; height: number } {
   // Get terminal size (with fallbacks)
   const termCols = process.stdout.columns || 120;
   const termRows = process.stdout.rows || 40;
@@ -329,13 +341,13 @@ function calculateDisplaySize(requestedWidth?: number, requestedHeight?: number)
 }
 
 function debugGamepad(): void {
-  console.log('Gamepad Debug Mode');
-  console.log('==================');
-  console.log('Press Ctrl+C to exit\n');
+  console.log("Gamepad Debug Mode");
+  console.log("==================");
+  console.log("Press Ctrl+C to exit\n");
 
   const devices = GamepadManager.listDevices();
   if (devices.length === 0) {
-    console.log('No gamepad devices found.');
+    console.log("No gamepad devices found.");
     process.exit(1);
   }
 
@@ -345,90 +357,105 @@ function debugGamepad(): void {
 
   try {
     const device = new HID.HID(deviceInfo.path);
-    let lastData = '';
+    let lastData = "";
 
-    device.on('data', (data: Buffer) => {
+    device.on("data", (data: Buffer) => {
       // Only print if data changed (reduces noise)
       const hexStr = Array.from(data)
-        .map((b, i) => `${i.toString().padStart(2)}:${b.toString(16).padStart(2, '0')}`)
-        .join(' ');
+        .map(
+          (b, i) =>
+            `${i.toString().padStart(2)}:${b.toString(16).padStart(2, "0")}`
+        )
+        .join(" ");
 
       if (hexStr !== lastData) {
         // Show byte index and value in both hex and decimal
         console.log(`\nBytes (${data.length}):`);
         const parts: string[] = [];
         for (let i = 0; i < data.length; i++) {
-          parts.push(`[${i}]=0x${data[i].toString(16).padStart(2, '0')}(${data[i].toString().padStart(3)})`);
+          parts.push(
+            `[${i}]=0x${data[i].toString(16).padStart(2, "0")}(${data[i]
+              .toString()
+              .padStart(3)})`
+          );
         }
-        console.log(parts.join(' '));
+        console.log(parts.join(" "));
         lastData = hexStr;
       }
     });
 
-    device.on('error', (err) => {
-      console.error('Device error:', err);
+    device.on("error", (err) => {
+      console.error("Device error:", err);
       process.exit(1);
     });
 
     // Keep running
-    process.on('SIGINT', () => {
+    process.on("SIGINT", () => {
       device.close();
       process.exit(0);
     });
   } catch (err) {
-    console.error('Failed to open device:', err);
+    console.error("Failed to open device:", err);
     process.exit(1);
   }
 }
 
 function listGamepads(): void {
-  console.log('Detected Gamepad Devices');
-  console.log('========================\n');
+  console.log("Detected Gamepad Devices");
+  console.log("========================\n");
 
   const devices = GamepadManager.listDevices();
 
   if (devices.length === 0) {
-    console.log('No gamepad devices detected.\n');
-    console.log('Tips:');
-    console.log('  - Make sure your controller is connected and paired (for Bluetooth)');
-    console.log('  - Try pressing a button on the controller to wake it up');
-    console.log('  - On Linux, you may need to add your user to the "input" group\n');
+    console.log("No gamepad devices detected.\n");
+    console.log("Tips:");
+    console.log(
+      "  - Make sure your controller is connected and paired (for Bluetooth)"
+    );
+    console.log("  - Try pressing a button on the controller to wake it up");
+    console.log(
+      '  - On Linux, you may need to add your user to the "input" group\n'
+    );
   } else {
     for (const device of devices) {
       console.log(`${device.product}`);
       console.log(`  Manufacturer: ${device.manufacturer}`);
-      console.log(`  Vendor ID:    0x${device.vendorId.toString(16).padStart(4, '0')}`);
-      console.log(`  Product ID:   0x${device.productId.toString(16).padStart(4, '0')}`);
+      console.log(
+        `  Vendor ID:    0x${device.vendorId.toString(16).padStart(4, "0")}`
+      );
+      console.log(
+        `  Product ID:   0x${device.productId.toString(16).padStart(4, "0")}`
+      );
       console.log(`  Profile:      ${device.profile}`);
-      console.log('');
+      console.log("");
     }
   }
 
-  console.log('Supported Controllers:');
+  console.log("Supported Controllers:");
   for (const profile of GamepadManager.getSupportedProfiles()) {
     console.log(`  - ${profile}`);
   }
-  console.log('  - Generic USB Gamepad (fallback)');
+  console.log("  - Generic USB Gamepad (fallback)");
 }
 
 function listCoresCommand(): void {
-  console.log('Available Emulator Cores');
-  console.log('========================\n');
+  console.log("Available Emulator Cores");
+  console.log("========================\n");
 
   const cores = listCores();
 
   if (cores.length === 0) {
-    console.log('No cores registered.\n');
+    console.log("No cores registered.\n");
   } else {
     for (const core of cores) {
       console.log(`${core.name} (--core ${core.id})`);
-      console.log(`  Extensions: ${core.extensions.join(', ')}`);
-      console.log('');
+      console.log(`  Extensions: ${core.extensions.join(", ")}`);
+      console.log("");
     }
   }
 
-  console.log('Note: Cores are auto-detected by ROM file extension.');
-  console.log('      Use --core <id> to override auto-detection.');
+  console.log("Note: Cores are auto-detected by ROM file extension.");
+  console.log("      Use --core <id> to override auto-detection.");
 }
 
 async function main(): Promise<void> {
@@ -466,17 +493,17 @@ async function main(): Promise<void> {
     coreFactory = getCoreFactory(options.core);
     if (!coreFactory) {
       console.error(`Error: Unknown core '${options.core}'`);
-      console.error('Use --list-cores to see available cores.');
+      console.error("Use --list-cores to see available cores.");
       process.exit(1);
     }
   } else {
     // Auto-detect core by file extension
     coreFactory = detectCoreFactory(options.romPath);
     if (!coreFactory) {
-      const supportedExts = getSupportedExtensions().join(', ');
+      const supportedExts = getSupportedExtensions().join(", ");
       console.error(`Error: Unsupported ROM format for '${options.romPath}'`);
       console.error(`Supported formats: ${supportedExts}`);
-      console.error('Use --list-cores to see available cores.');
+      console.error("Use --list-cores to see available cores.");
       process.exit(1);
     }
   }
@@ -486,30 +513,52 @@ async function main(): Promise<void> {
 
   const systemInfo = coreFactory.getSystemInfo();
 
-  console.log('TUI-NES - Terminal Retro Emulator');
-  console.log('==================================');
+  console.log("TUI-NES - Terminal Retro Emulator");
+  console.log("==================================");
   console.log(`Core: ${systemInfo.name}`);
   console.log(`Loading ROM: ${options.romPath}`);
-  console.log(`Terminal: ${process.stdout.columns || '?'}x${process.stdout.rows || '?'}`);
+  console.log(
+    `Terminal: ${process.stdout.columns || "?"}x${process.stdout.rows || "?"}`
+  );
   console.log(`Render mode: ${options.renderMode}`);
-  if (options.renderMode === 'kitty') {
+  if (options.renderMode === "kitty") {
     if (options.scale !== undefined) {
-      console.log(`Scale: ${options.scale}x (${256 * options.scale}x${240 * options.scale} pixels)`);
+      console.log(
+        `Scale: ${options.scale}x (${256 * options.scale}x${
+          240 * options.scale
+        } pixels)`
+      );
     } else {
-      console.log('Scale: auto-fit to terminal');
+      console.log("Scale: auto-fit to terminal");
     }
-  } else if (options.renderMode === 'emoji') {
-    console.log(`Display: ${displaySize.width}x${displaySize.height}${options.width === undefined ? ' (auto-fit)' : ''}`);
-    console.log('Mode: Emoji characters');
-  } else if (options.renderMode === 'ascii') {
-    console.log(`Display: ${displaySize.width}x${displaySize.height}${options.width === undefined ? ' (auto-fit)' : ''}`);
-    console.log(`Mode: ASCII characters${options.useColor ? ' with color' : ' (grayscale)'}`);
+  } else if (options.renderMode === "emoji") {
+    console.log(
+      `Display: ${displaySize.width}x${displaySize.height}${
+        options.width === undefined ? " (auto-fit)" : ""
+      }`
+    );
+    console.log("Mode: Emoji characters");
+  } else if (options.renderMode === "ascii") {
+    console.log(
+      `Display: ${displaySize.width}x${displaySize.height}${
+        options.width === undefined ? " (auto-fit)" : ""
+      }`
+    );
+    console.log(
+      `Mode: ASCII characters${
+        options.useColor ? " with color" : " (grayscale)"
+      }`
+    );
   } else {
-    console.log(`Display: ${displaySize.width}x${displaySize.height}${options.width === undefined ? ' (auto-fit)' : ''}`);
-    console.log('Mode: Unicode half-blocks with color');
+    console.log(
+      `Display: ${displaySize.width}x${displaySize.height}${
+        options.width === undefined ? " (auto-fit)" : ""
+      }`
+    );
+    console.log("Mode: Unicode half-blocks with color");
   }
-  console.log('');
-  console.log('Press Escape or Ctrl+C to quit');
+  console.log("");
+  console.log("Press Escape or Ctrl+C to quit");
 
   // Check for saved state
   const statePath = getStatePath(options.romPath);
@@ -518,25 +567,30 @@ async function main(): Promise<void> {
   let shouldRestore = false;
 
   if (stateFileExists && !validState) {
-    console.log('');
-    console.warn('Warning: A saved state file was found but appears to be corrupted or invalid.');
-    console.warn('The state file will be ignored and a fresh game will start.');
-    console.log('');
+    console.log("");
+    console.warn(
+      "Warning: A saved state file was found but appears to be corrupted or invalid."
+    );
+    console.warn("The state file will be ignored and a fresh game will start.");
+    console.log("");
   } else if (validState) {
-    console.log('');
-    console.log('A saved state was found for this ROM.');
-    shouldRestore = await askYesNo('Would you like to resume from where you left off?');
-    console.log('');
+    console.log("");
+    console.log("A saved state was found for this ROM.");
+    shouldRestore = await askYesNo(
+      "Would you like to resume from where you left off?"
+    );
+    console.log("");
   }
 
   if (!shouldRestore) {
-    console.log('Starting in 2 seconds...');
+    console.log("Starting in 2 seconds...");
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
   try {
     // Only pass explicit dimensions if user specified them (enables auto-resize otherwise)
-    const explicitDimensions = options.width !== undefined || options.height !== undefined;
+    const explicitDimensions =
+      options.width !== undefined || options.height !== undefined;
 
     const emulator = new Emulator({
       romPath: options.romPath,
@@ -555,14 +609,14 @@ async function main(): Promise<void> {
     if (shouldRestore) {
       stateLoaded = await emulator.loadState();
       if (stateLoaded) {
-        console.log('Resuming from saved state...');
+        console.log("Resuming from saved state...");
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
     await emulator.run(stateLoaded);
   } catch (error) {
-    console.error('Error:', error instanceof Error ? error.message : error);
+    console.error("Error:", error instanceof Error ? error.message : error);
     process.exit(1);
   }
 }

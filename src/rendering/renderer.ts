@@ -9,6 +9,8 @@ export interface RendererOptions {
   useTrueColor: boolean;
   asciiMode: boolean;
   emojiMode: boolean;
+  sourceWidth: number;   // Source framebuffer width (e.g., 256 for NES, 160 for GBC)
+  sourceHeight: number;  // Source framebuffer height (e.g., 240 for NES, 144 for GBC)
 }
 
 // ASCII character ramps for different density levels
@@ -25,6 +27,8 @@ export class TerminalRenderer {
   private asciiChars: string;
   private offsetCol: number = 0;  // Horizontal offset for centering (0-based for padding)
   private offsetRow: number = 1;  // Vertical offset for centering (1-based for ANSI)
+  private sourceWidth: number;   // Source framebuffer width
+  private sourceHeight: number;  // Source framebuffer height
 
   constructor(options: Partial<RendererOptions> = {}) {
     this.width = options.width ?? 128;
@@ -33,6 +37,8 @@ export class TerminalRenderer {
     this.useTrueColor = options.useTrueColor ?? true;
     this.asciiMode = options.asciiMode ?? false;
     this.emojiMode = options.emojiMode ?? false;
+    this.sourceWidth = options.sourceWidth ?? 256;   // Default to NES width
+    this.sourceHeight = options.sourceHeight ?? 240; // Default to NES height
     // Use dense character set for better detail in ASCII mode
     this.asciiChars = this.asciiMode ? ASCII_CHARS_DENSE : ASCII_CHARS_SIMPLE;
     // Calculate centering offsets
@@ -61,32 +67,32 @@ export class TerminalRenderer {
   render(frameBuffer: Uint8Array): string {
     const output: string[] = [];
 
-    // NES resolution is 256x240
+    // Use source resolution from constructor (defaults to NES 256x240)
     // For ASCII/emoji mode: 1 char = 1 pixel (no half-blocks)
     // For terminal mode: half-block characters for 2 vertical pixels per character
-    const scaleX = 256 / this.width;
+    const scaleX = this.sourceWidth / this.width;
     const scaleY = (this.asciiMode || this.emojiMode)
-      ? 240 / this.height  // ASCII/emoji: 1 char = 1 pixel
-      : 240 / (this.height * 2); // Terminal: half-blocks
+      ? this.sourceHeight / this.height  // ASCII/emoji: 1 char = 1 pixel
+      : this.sourceHeight / (this.height * 2); // Terminal: half-blocks
 
     for (let charY = 0; charY < this.height; charY++) {
       // Use array for line building to avoid O(n²) string concatenation
       const lineChars: string[] = [];
 
       for (let charX = 0; charX < this.width; charX++) {
-        const nesX = Math.floor(charX * scaleX);
+        const srcX = Math.floor(charX * scaleX);
 
         if (this.emojiMode) {
           // Emoji mode: one emoji per pixel (emoji is 2 terminal columns wide)
           // Uses color-matched emoji lookup for accurate color representation
-          const nesY = Math.floor(charY * scaleY);
-          const pixel = frameBuffer[nesY * 256 + nesX] & 0x3f;
+          const srcY = Math.floor(charY * scaleY);
+          const pixel = frameBuffer[srcY * this.sourceWidth + srcX] & 0x3f;
           const emoji = nesColorToEmoji(pixel);
           lineChars.push(emoji);
         } else if (this.asciiMode) {
           // ASCII mode: one character per pixel
-          const nesY = Math.floor(charY * scaleY);
-          const pixel = frameBuffer[nesY * 256 + nesX] & 0x3f;
+          const srcY = Math.floor(charY * scaleY);
+          const pixel = frameBuffer[srcY * this.sourceWidth + srcX] & 0x3f;
           const lum = nesColorLuminance(pixel);
           const char = this.grayscaleChar(lum);
 
@@ -100,11 +106,11 @@ export class TerminalRenderer {
           }
         } else {
           // Terminal mode: half-block characters
-          const nesY1 = Math.floor(charY * 2 * scaleY);
-          const nesY2 = Math.floor((charY * 2 + 1) * scaleY);
+          const srcY1 = Math.floor(charY * 2 * scaleY);
+          const srcY2 = Math.floor((charY * 2 + 1) * scaleY);
 
-          const topPixel = frameBuffer[nesY1 * 256 + nesX] & 0x3f;
-          const bottomPixel = frameBuffer[nesY2 * 256 + nesX] & 0x3f;
+          const topPixel = frameBuffer[srcY1 * this.sourceWidth + srcX] & 0x3f;
+          const bottomPixel = frameBuffer[srcY2 * this.sourceWidth + srcX] & 0x3f;
 
           if (this.useColor) {
             // Use half-block character with top pixel as foreground, bottom as background
