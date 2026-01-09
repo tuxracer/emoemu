@@ -4,5 +4,7 @@ dist/
 .DS_Store
 roms/
 *.nes
+*.gba
+*.agb
 *.srm
 *.state
