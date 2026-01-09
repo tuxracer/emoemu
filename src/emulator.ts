@@ -388,14 +388,14 @@ export class Emulator {
 
   private setupAudio(): void {
     const sampleRate = this.apu.getSampleRate();
-    // Frame size for audio buffer (~20ms at sample rate)
-    const frameSize = Math.floor(sampleRate * 0.02);
+    // Frame size for audio buffer (~10ms at sample rate for low latency)
+    const frameSize = Math.floor(sampleRate * 0.01);
     // Buffer size in bytes (16-bit stereo = 4 bytes per sample frame)
     const frameBytes = frameSize * 2 * 2; // frameSize * 2 channels * 2 bytes
 
     // Fixed-size ring buffer for sample accumulation (prevents unbounded growth)
-    // Size: enough for ~100ms of audio (5 frames worth)
-    const ringBufferSize = frameSize * 5;
+    // Size: enough for ~100ms of audio (10 frames worth at 10ms each)
+    const ringBufferSize = frameSize * 10;
     const ringBuffer = new Float32Array(ringBufferSize);
     let ringWritePos = 0;
     let ringReadPos = 0;
@@ -473,7 +473,7 @@ export class Emulator {
         'TUI-NES',
         null, // No input callback
         onFramePlayed, // Frame output callback for flow control
-        undefined, // Default flags
+        0, // Default flags (no special options)
         onAudioError // Error callback for graceful recovery
       );
 

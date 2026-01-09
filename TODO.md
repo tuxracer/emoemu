@@ -93,7 +93,7 @@
 - [x] Fixed-size ring buffer (prevent unbounded memory growth)
 - [x] Higher sample rate (44100 Hz for better quality)
 - [x] Error callback for graceful error recovery
-- [ ] Smaller frame size (10ms or 5ms for lower latency)
+- [x] Smaller frame size (10ms for lower latency)
 
 ---
 
