@@ -7,6 +7,8 @@ import HID from 'node-hid';
 import { existsSync, readFileSync } from 'fs';
 import { gunzipSync } from 'zlib';
 import type { SaveState } from './emulator.js';
+import { findProfile, isGamepadDevice } from './input/gamepad-profiles.js';
+import { Button } from './input/controller.js';
 
 /**
  * Validate a state file and return the parsed state if valid
@@ -37,20 +39,81 @@ function validateStateFile(statePath: string): SaveState | null {
 
 /**
  * Prompt the user with a yes/no question (defaults to yes on empty input)
+ * Supports both keyboard input and gamepad A/B buttons
  */
 function askYesNo(question: string): Promise<boolean> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
   return new Promise((resolve) => {
-    rl.question(`${question} [Y/n]: `, (answer) => {
+    let resolved = false;
+    let gamepadDevice: HID.HID | null = null;
+
+    const cleanup = () => {
+      if (gamepadDevice) {
+        try {
+          gamepadDevice.close();
+        } catch {
+          // Ignore close errors
+        }
+        gamepadDevice = null;
+      }
+    };
+
+    const finish = (result: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
       rl.close();
+      resolve(result);
+    };
+
+    // Set up keyboard input
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    rl.question(`${question} [Y/n]: `, (answer) => {
       const trimmed = answer.trim().toLowerCase();
       // Default to yes if empty, otherwise check for explicit no
-      resolve(trimmed !== 'n' && trimmed !== 'no');
+      finish(trimmed !== 'n' && trimmed !== 'no');
     });
+
+    // Try to set up gamepad input
+    try {
+      const devices = HID.devices();
+      const gamepadDevices = devices.filter(isGamepadDevice);
+
+      const deviceInfo = gamepadDevices.find(d => d.path);
+      if (deviceInfo?.path) {
+        gamepadDevice = new HID.HID(deviceInfo.path as string);
+        const profile = findProfile(deviceInfo.vendorId ?? 0, deviceInfo.productId ?? 0);
+
+        gamepadDevice.on('data', (data: Buffer) => {
+          if (resolved) return;
+
+          try {
+            const buttonStates = profile.parseReport(data);
+            const aPressed = buttonStates.get(Button.A) ?? false;
+            const bPressed = buttonStates.get(Button.B) ?? false;
+
+            if (aPressed) {
+              console.log('A'); // Echo the selection
+              finish(true);
+            } else if (bPressed) {
+              console.log('B'); // Echo the selection
+              finish(false);
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        });
+
+        gamepadDevice.on('error', () => {
+          cleanup();
+        });
+      }
+    } catch {
+      // Gamepad setup failed - keyboard only
+    }
   });
 }
 
