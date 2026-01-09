@@ -723,7 +723,7 @@ export class Emulator {
   }
 
   // Save state management
-  private static readonly SAVE_STATE_VERSION = 1;
+  private static readonly SAVE_STATE_VERSION = 2;
 
   /**
    * Get the path for the save state file
@@ -759,10 +759,6 @@ export class Emulator {
    * Restore emulator state from a save state
    */
   setState(state: SaveState): void {
-    if (state.version !== Emulator.SAVE_STATE_VERSION) {
-      console.warn(`Save state version mismatch: expected ${Emulator.SAVE_STATE_VERSION}, got ${state.version}`);
-    }
-
     this.cpu.setState(state.cpu);
     this.ppu.setState(state.ppu);
     this.apu.setState(state.apu);
@@ -803,6 +799,13 @@ export class Emulator {
       const isGzipped = data[0] === 0x1f && data[1] === 0x8b;
       const json = isGzipped ? gunzipSync(data).toString('utf-8') : data.toString('utf-8');
       const state = JSON.parse(json) as SaveState;
+
+      // Validate version - reject incompatible save states
+      if (state.version !== Emulator.SAVE_STATE_VERSION) {
+        console.warn(`Incompatible save state version: expected ${Emulator.SAVE_STATE_VERSION}, got ${state.version}. Starting fresh.`);
+        return false;
+      }
+
       this.setState(state);
       console.log(`Loaded state: ${statePath}`);
       return true;
