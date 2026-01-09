@@ -92,7 +92,7 @@ export interface CoreState {
   /** Core identifier (validates correct core) */
   coreId: string;
 
-  /** Game identifier (ROM path or checksum) */
+  /** Game identifier (ROM filename, not full path for privacy) */
   gameId: string;
 
   /** Serialized state data (opaque to frontend) */

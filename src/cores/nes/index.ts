@@ -21,6 +21,7 @@ import { Bus } from './bus.js';
 import { Cartridge } from './cartridge.js';
 import { Controller, Button } from '../../input/controller.js';
 import { nesPaletteFlat } from '../../rendering/palette.js';
+import { basename } from 'path';
 
 /**
  * NES button IDs (matches the Button enum from controller.ts)
@@ -296,7 +297,7 @@ export class NESCore implements Core {
     return {
       version: NES_STATE_VERSION,
       coreId: 'nes',
-      gameId: this.romPath,
+      gameId: basename(this.romPath),
       data: {
         cpu: this.cpu.getState(),
         ppu: this.ppu.getState(),

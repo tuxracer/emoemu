@@ -15,6 +15,7 @@ import { Bus, type BusState } from './bus.js';
 import { Timer, type TimerState } from './timer.js';
 import { Cartridge, type CartridgeState } from './cartridge.js';
 import { APU, type APUState } from './apu.js';
+import { basename } from 'path';
 
 // Combined state for all GBC components
 interface GBCState {
@@ -252,7 +253,7 @@ export class GBCCore implements Core {
     return {
       version: GBC_STATE_VERSION,
       coreId: 'gbc',
-      gameId: this.romPath,
+      gameId: basename(this.romPath),
       data: gbcState as unknown as Record<string, unknown>,
     };
   }

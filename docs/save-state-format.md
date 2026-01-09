@@ -21,7 +21,7 @@ All save states share this common wrapper structure:
 {
   "version": 1,
   "coreId": "nes",
-  "gameId": "path/to/game.nes",
+  "gameId": "game.nes",
   "data": { ... }
 }
 ```
@@ -30,7 +30,7 @@ All save states share this common wrapper structure:
 |-------|------|-------------|
 | `version` | number | Save state format version (core-specific) |
 | `coreId` | string | Core identifier (`"nes"` or `"gbc"`) |
-| `gameId` | string | Path to the ROM file |
+| `gameId` | string | ROM filename (e.g., `game.nes`, `zelda.gbc`) |
 | `data` | object | Core-specific state data |
 
 ### Validation
@@ -55,9 +55,9 @@ NES save states use `coreId: "nes"` and `version: 2`.
 
 ```json
 {
-  "version": 2,
+  "version": 1,
   "coreId": "nes",
-  "gameId": "path/to/game.nes",
+  "gameId": "game.nes",
   "data": {
     "cpu": { ... },
     "ppu": { ... },
@@ -337,7 +337,7 @@ GBC save states use `coreId: "gbc"` and `version: 1`.
 {
   "version": 1,
   "coreId": "gbc",
-  "gameId": "path/to/game.gbc",
+  "gameId": "zelda.gbc",
   "data": {
     "cpu": { ... },
     "ppu": { ... },
