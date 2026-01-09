@@ -145,6 +145,9 @@ export class Emulator {
     this.systemInfo = this.core.getSystemInfo();
     this.core.loadRom(options.romPath);
 
+    // Load battery save (.srm) if available
+    this.loadBatterySave();
+
     // Set target frame time based on core's FPS
     this.targetFrameTime = 1000 / this.systemInfo.fps;
 
@@ -371,15 +374,11 @@ export class Emulator {
       process.stdout.on('resize', this.resizeHandler);
     }
 
-    // Set up auto-save for battery-backed games (core handles its own periodic saves,
-    // but this ensures saves on a timer in case of crash)
+    // Set up auto-save for battery-backed games
+    // Saves to .srm file periodically in case of crash
     if (this.core.hasBatterySave()) {
       this.autoSaveInterval = setInterval(() => {
-        // Get and set battery RAM to trigger save through core
-        const batteryRam = this.core.getBatteryRam();
-        if (batteryRam) {
-          this.core.setBatteryRam(batteryRam);
-        }
+        this.saveBatterySave();
       }, Emulator.AUTO_SAVE_INTERVAL_MS);
     }
 
@@ -707,10 +706,13 @@ export class Emulator {
       this.autoSaveInterval = null;
     }
 
+    // Save battery RAM to .srm file (must happen before destroy)
+    this.saveBatterySave();
+
     // Save state on exit (must happen before destroy)
     this.saveState();
 
-    // Destroy core (handles battery-backed RAM save)
+    // Destroy core
     this.core.destroy();
 
     // Remove resize handler
@@ -791,6 +793,60 @@ export class Emulator {
   private getStatePath(): string {
     // Append .state to the full ROM filename
     return this.romPath + '.state';
+  }
+
+  /**
+   * Get the path for the battery save (.srm) file
+   * Uses RetroArch-compatible naming: [full rom filename].srm
+   */
+  private getSrmPath(): string {
+    return this.romPath + '.srm';
+  }
+
+  /**
+   * Load battery save from .srm file (RetroArch-compatible format)
+   * Raw binary SRAM data, no header
+   */
+  private loadBatterySave(): void {
+    if (!this.core.hasBatterySave()) {
+      return;
+    }
+
+    const srmPath = this.getSrmPath();
+    if (!existsSync(srmPath)) {
+      return;
+    }
+
+    try {
+      const data = readFileSync(srmPath);
+      this.core.setBatteryRam(new Uint8Array(data));
+      console.log(`Loaded battery save: ${srmPath}`);
+    } catch (err) {
+      console.error(`Failed to load battery save: ${srmPath}`, err);
+    }
+  }
+
+  /**
+   * Save battery RAM to .srm file (RetroArch-compatible format)
+   * Raw binary SRAM data, no header
+   */
+  private saveBatterySave(): void {
+    if (!this.core.hasBatterySave()) {
+      return;
+    }
+
+    const batteryRam = this.core.getBatteryRam();
+    if (!batteryRam) {
+      return;
+    }
+
+    const srmPath = this.getSrmPath();
+    try {
+      writeFileSync(srmPath, Buffer.from(batteryRam));
+      console.log(`Saved battery save: ${srmPath}`);
+    } catch (err) {
+      console.error(`Failed to save battery save: ${srmPath}`, err);
+    }
   }
 
   /**
