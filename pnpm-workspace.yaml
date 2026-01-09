@@ -1,0 +1,6 @@
+onlyBuiltDependencies:
+  - audify
+  - esbuild
+  - node-hid
+
+minimumReleaseAge: 10080

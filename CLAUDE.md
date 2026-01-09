@@ -5,10 +5,10 @@ A terminal-based multi-core emulator written in TypeScript that renders graphics
 ## Quick Reference
 
 ```bash
-npm run build         # Build the project
-npm start -- <rom>    # Run a ROM (auto-detects core)
-npm run typecheck     # Type check without building
-npm test              # Run tests
+pnpm run build         # Build the project
+pnpm start -- <rom>    # Run a ROM (auto-detects core)
+pnpm run typecheck     # Type check without building
+pnpm test              # Run tests
 ```
 
 ## Project Structure
@@ -257,8 +257,8 @@ NES controller uses shift register. Write $01 then $00 to $4016 to latch, then r
 ## Testing
 
 ```bash
-npm test                 # Watch mode
-npm run test:run         # Single run
+pnpm test                 # Watch mode
+pnpm run test:run         # Single run
 ```
 
 Use nestest.nes ROM for CPU verification.
