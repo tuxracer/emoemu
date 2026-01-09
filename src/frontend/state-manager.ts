@@ -63,11 +63,10 @@ export class StateManager {
 
   /**
    * Get the path for the save state file.
-   * Replaces the ROM extension with .state
+   * Appends .state to the full ROM filename
    */
   getStatePath(): string {
-    // Remove common ROM extensions and add .state
-    return this.romPath.replace(/\.(nes|gba|sfc|smc|gb|gbc)$/i, '.state');
+    return this.romPath + '.state';
   }
 
   /**

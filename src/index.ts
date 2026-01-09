@@ -151,14 +151,10 @@ function askYesNo(
 
 /**
  * Get the save state path for a ROM
- * Handles any ROM extension by replacing it with .state
+ * Appends .state to the full ROM filename
  */
 function getStatePath(romPath: string): string {
-  // Get all supported extensions and create a regex pattern
-  const extensions = getSupportedExtensions();
-  const extPattern = extensions.map((ext) => ext.replace(".", "\\.")).join("|");
-  const regex = new RegExp(`(${extPattern})$`, "i");
-  return romPath.replace(regex, ".state");
+  return romPath + ".state";
 }
 
 function printUsage(): void {
@@ -611,6 +607,9 @@ async function main(): Promise<void> {
       if (stateLoaded) {
         console.log("Resuming from saved state...");
         await new Promise((resolve) => setTimeout(resolve, 1000));
+      } else {
+        console.log("Failed to load saved state, starting fresh...");
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
 
