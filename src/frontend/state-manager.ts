@@ -146,6 +146,14 @@ export class StateManager {
         };
       }
 
+      // Validate data field exists and is an object
+      if (!state.state.data || typeof state.state.data !== 'object') {
+        return {
+          valid: false,
+          error: 'Invalid state: missing or invalid data field',
+        };
+      }
+
       return { valid: true, state };
     } catch (err) {
       return {
