@@ -119,11 +119,6 @@ The loader also supports uncompressed JSON for backwards compatibility, detected
   "cycleCount": 0,
   "frameCycleCount": 0,
   "frameStep": 0,
-  "pulse1Enabled": true,
-  "pulse2Enabled": true,
-  "triangleEnabled": true,
-  "noiseEnabled": false,
-  "dmcEnabled": false,
   "pulse1": { ... },
   "pulse2": { ... },
   "triangle": { ... },
@@ -140,16 +135,11 @@ The loader also supports uncompressed JSON for backwards compatibility, detected
 | `cycleCount` | number | Total APU cycles |
 | `frameCycleCount` | number | Cycles within current frame |
 | `frameStep` | number | Current frame sequencer step |
-| `pulse1Enabled` | boolean | Pulse 1 channel enabled (for backwards compatibility) |
-| `pulse2Enabled` | boolean | Pulse 2 channel enabled (for backwards compatibility) |
-| `triangleEnabled` | boolean | Triangle channel enabled (for backwards compatibility) |
-| `noiseEnabled` | boolean | Noise channel enabled (for backwards compatibility) |
-| `dmcEnabled` | boolean | DMC channel enabled (for backwards compatibility) |
-| `pulse1` | object | Full Pulse 1 channel state (optional) |
-| `pulse2` | object | Full Pulse 2 channel state (optional) |
-| `triangle` | object | Full Triangle channel state (optional) |
-| `noise` | object | Full Noise channel state (optional) |
-| `dmc` | object | Full DMC channel state (optional) |
+| `pulse1` | object | Pulse 1 channel state |
+| `pulse2` | object | Pulse 2 channel state |
+| `triangle` | object | Triangle channel state |
+| `noise` | object | Noise channel state |
+| `dmc` | object | DMC channel state |
 
 ### Pulse Channel State
 
@@ -234,7 +224,7 @@ The loader also supports uncompressed JSON for backwards compatibility, detected
 }
 ```
 
-Note: Full channel state ensures perfect audio continuity when loading save states. The `*Enabled` fields at the top level are kept for backwards compatibility with older save files that don't include full channel state.
+Note: Full channel state ensures perfect audio continuity when loading save states.
 
 ## Bus State
 
@@ -312,7 +302,7 @@ No internal state.
 | Version | Changes |
 |---------|---------|
 | 1 | Initial format |
-| 1.1 | Added full APU channel state (backwards compatible) |
+| 2 | Added full APU channel state |
 
 ## Validation
 

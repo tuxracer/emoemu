@@ -76,18 +76,12 @@ export interface APUState {
   cycleCount: number;
   frameCycleCount: number;
   frameStep: number;
-  // Channel enabled states (from $4015) - kept for backwards compatibility
-  pulse1Enabled: boolean;
-  pulse2Enabled: boolean;
-  triangleEnabled: boolean;
-  noiseEnabled: boolean;
-  dmcEnabled: boolean;
-  // Full channel states (optional for backwards compatibility with old saves)
-  pulse1?: PulseChannelState;
-  pulse2?: PulseChannelState;
-  triangle?: TriangleChannelState;
-  noise?: NoiseChannelState;
-  dmc?: DMCChannelState;
+  // Full channel states
+  pulse1: PulseChannelState;
+  pulse2: PulseChannelState;
+  triangle: TriangleChannelState;
+  noise: NoiseChannelState;
+  dmc: DMCChannelState;
 }
 
 // Length counter lookup table
@@ -1080,13 +1074,6 @@ export class APU {
       cycleCount: this.cycleCount,
       frameCycleCount: this.frameCycleCount,
       frameStep: this.frameStep,
-      // Save channel enabled states (for backwards compatibility)
-      pulse1Enabled: this.pulse1.enabled,
-      pulse2Enabled: this.pulse2.enabled,
-      triangleEnabled: this.triangle.enabled,
-      noiseEnabled: this.noise.enabled,
-      dmcEnabled: this.dmc.enabled,
-      // Save full channel state for perfect audio continuity
       pulse1: this.pulse1.getState(),
       pulse2: this.pulse2.getState(),
       triangle: this.triangle.getState(),
@@ -1103,36 +1090,11 @@ export class APU {
     this.frameCycleCount = state.frameCycleCount;
     this.frameStep = state.frameStep;
 
-    // Restore full channel state if available, otherwise fall back to enabled states only
-    if (state.pulse1) {
-      this.pulse1.setState(state.pulse1);
-    } else {
-      this.pulse1.setEnabled(state.pulse1Enabled ?? false);
-    }
-
-    if (state.pulse2) {
-      this.pulse2.setState(state.pulse2);
-    } else {
-      this.pulse2.setEnabled(state.pulse2Enabled ?? false);
-    }
-
-    if (state.triangle) {
-      this.triangle.setState(state.triangle);
-    } else {
-      this.triangle.setEnabled(state.triangleEnabled ?? false);
-    }
-
-    if (state.noise) {
-      this.noise.setState(state.noise);
-    } else {
-      this.noise.setEnabled(state.noiseEnabled ?? false);
-    }
-
-    if (state.dmc) {
-      this.dmc.setState(state.dmc);
-    } else {
-      this.dmc.setEnabled(state.dmcEnabled ?? false);
-    }
+    this.pulse1.setState(state.pulse1);
+    this.pulse2.setState(state.pulse2);
+    this.triangle.setState(state.triangle);
+    this.noise.setState(state.noise);
+    this.dmc.setState(state.dmc);
 
     // Reset sample accumulator and filter state
     this.sampleAccumulator = 0;
