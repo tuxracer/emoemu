@@ -118,7 +118,12 @@ The loader also supports uncompressed JSON for backwards compatibility, detected
   "frameIRQPending": false,
   "cycleCount": 0,
   "frameCycleCount": 0,
-  "frameStep": 0
+  "frameStep": 0,
+  "pulse1Enabled": true,
+  "pulse2Enabled": true,
+  "triangleEnabled": true,
+  "noiseEnabled": false,
+  "dmcEnabled": false
 }
 ```
 
@@ -130,8 +135,13 @@ The loader also supports uncompressed JSON for backwards compatibility, detected
 | `cycleCount` | number | Total APU cycles |
 | `frameCycleCount` | number | Cycles within current frame |
 | `frameStep` | number | Current frame sequencer step |
+| `pulse1Enabled` | boolean | Pulse 1 channel enabled |
+| `pulse2Enabled` | boolean | Pulse 2 channel enabled |
+| `triangleEnabled` | boolean | Triangle channel enabled |
+| `noiseEnabled` | boolean | Noise channel enabled |
+| `dmcEnabled` | boolean | DMC channel enabled |
 
-Note: Audio channel state is not saved. Channels are reset on load and regenerate audio from the restored game state.
+Note: Only channel enabled states are saved. Full channel register state is not preserved; channels regenerate audio from the game's register writes after restore.
 
 ## Bus State
 

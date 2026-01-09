@@ -8,6 +8,12 @@ export interface APUState {
   cycleCount: number;
   frameCycleCount: number;
   frameStep: number;
+  // Channel enabled states (from $4015)
+  pulse1Enabled: boolean;
+  pulse2Enabled: boolean;
+  triangleEnabled: boolean;
+  noiseEnabled: boolean;
+  dmcEnabled: boolean;
 }
 
 // Length counter lookup table
@@ -780,6 +786,12 @@ export class APU {
       cycleCount: this.cycleCount,
       frameCycleCount: this.frameCycleCount,
       frameStep: this.frameStep,
+      // Save channel enabled states
+      pulse1Enabled: this.pulse1.enabled,
+      pulse2Enabled: this.pulse2.enabled,
+      triangleEnabled: this.triangle.enabled,
+      noiseEnabled: this.noise.enabled,
+      dmcEnabled: this.dmc.enabled,
     };
   }
 
@@ -790,12 +802,13 @@ export class APU {
     this.cycleCount = state.cycleCount;
     this.frameCycleCount = state.frameCycleCount;
     this.frameStep = state.frameStep;
-    // Reset audio channels - they'll regenerate audio from the restored game state
-    this.pulse1.setEnabled(false);
-    this.pulse2.setEnabled(false);
-    this.triangle.setEnabled(false);
-    this.noise.setEnabled(false);
-    this.dmc.setEnabled(false);
+    // Restore channel enabled states (with fallback for old save states)
+    this.pulse1.setEnabled(state.pulse1Enabled ?? false);
+    this.pulse2.setEnabled(state.pulse2Enabled ?? false);
+    this.triangle.setEnabled(state.triangleEnabled ?? false);
+    this.noise.setEnabled(state.noiseEnabled ?? false);
+    this.dmc.setEnabled(state.dmcEnabled ?? false);
+    // Reset sample counters
     this.sampleCounter = 0;
     this.sampleIndex = 0;
   }
