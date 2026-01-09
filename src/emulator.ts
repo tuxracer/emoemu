@@ -402,24 +402,38 @@ export class Emulator {
   private setupAudio(): void {
     const sampleRate = this.apu.getSampleRate();
 
-    // Create speaker for direct audio output
-    this.speaker = new Speaker({
-      channels: 1,
-      bitDepth: 16,
-      sampleRate: sampleRate,
-    });
+    // Function to create/recreate speaker
+    const createSpeaker = () => {
+      if (this.speaker) {
+        try {
+          this.speaker.end();
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+      this.speaker = new Speaker({
+        channels: 1,
+        bitDepth: 16,
+        sampleRate: sampleRate,
+      });
+      this.speaker.on('error', () => {
+        // Don't disable audio on error, just recreate speaker next time
+      });
+    };
 
-    // Handle speaker errors silently
-    this.speaker.on('error', () => {
-      this.audioEnabled = false;
-      this.speaker = null;
-    });
+    createSpeaker();
 
     // Track audio timing for sync
     let audioStartTime = performance.now();
     let samplesWritten = 0;
     const maxAheadMs = 20;
     const maxBehindMs = 50;
+
+    // Track consecutive resyncs to detect stuck state
+    let resyncCount = 0;
+    let lastResyncTime = 0;
+    const maxResyncsBeforeReset = 5;
+    const resyncWindowMs = 2000; // Reset counter if no resync in 2 seconds
 
     // Connect APU sample output directly to speaker
     this.apu.onSamplesReady = (samples: Float32Array) => {
@@ -436,10 +450,30 @@ export class Emulator {
         return;
       }
 
-      // If too far behind, resync timing (accept the skip)
+      // If too far behind, resync timing
       if (aheadMs < -maxBehindMs) {
+        // Track resyncs to detect persistent problems
+        if (now - lastResyncTime < resyncWindowMs) {
+          resyncCount++;
+        } else {
+          resyncCount = 1;
+        }
+        lastResyncTime = now;
+
+        // If too many resyncs, recreate speaker to reset all state
+        if (resyncCount >= maxResyncsBeforeReset) {
+          createSpeaker();
+          resyncCount = 0;
+        }
+
         audioStartTime = now;
         samplesWritten = 0;
+        return; // Skip this batch after resync
+      }
+
+      // Reset resync counter if audio is healthy
+      if (now - lastResyncTime > resyncWindowMs) {
+        resyncCount = 0;
       }
 
       // Use pre-allocated buffer pool
