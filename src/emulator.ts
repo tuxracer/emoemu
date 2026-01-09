@@ -1,14 +1,27 @@
-import { CPU } from './cpu/cpu.js';
-import { PPU } from './ppu/ppu.js';
-import { Bus } from './memory/bus.js';
-import { Cartridge } from './cartridge/cartridge.js';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { gzipSync, gunzipSync, constants } from 'zlib';
+import { CPU, CPUState } from './cpu/cpu.js';
+import { PPU, PPUState } from './ppu/ppu.js';
+import { Bus, BusState } from './memory/bus.js';
+import { Cartridge, CartridgeState } from './cartridge/cartridge.js';
 import { Controller } from './input/controller.js';
 import { InputManager } from './input/input-manager.js';
 import { GamepadManager } from './input/gamepad-manager.js';
 import { TerminalRenderer } from './ppu/renderer.js';
 import { KittyRenderer } from './ppu/kitty-renderer.js';
-import { APU } from './apu/apu.js';
+import { APU, APUState } from './apu/apu.js';
 import Speaker from 'speaker';
+
+export interface SaveState {
+  version: number;
+  romPath: string;
+  cpu: CPUState;
+  ppu: PPUState;
+  apu: APUState;
+  bus: BusState;
+  cartridge: CartridgeState;
+  frameCount: number;
+}
 
 export type RenderMode = 'terminal' | 'kitty' | 'ascii' | 'emoji';
 
@@ -110,6 +123,7 @@ export class Emulator {
   private audioEnabled: boolean = true;
   private autoResize: boolean = false; // Whether to handle terminal resize events
   private showStatusBar: boolean = true;
+  private romPath: string;
 
   private running: boolean = false;
   private frameCount: number = 0;
@@ -125,6 +139,9 @@ export class Emulator {
   private static readonly AUDIO_BUFFER_COUNT = 3;
 
   constructor(options: EmulatorOptions) {
+    // Store ROM path for save states
+    this.romPath = options.romPath;
+
     // Initialize components
     this.cartridge = new Cartridge(options.romPath);
     this.bus = new Bus();
@@ -268,9 +285,11 @@ export class Emulator {
   }
 
   // Main emulation loop
-  async run(): Promise<void> {
+  async run(skipReset: boolean = false): Promise<void> {
     this.running = true;
-    this.reset();
+    if (!skipReset) {
+      this.reset();
+    }
 
     // Setup terminal
     process.stdout.write(this.renderer.hideCursor());
@@ -538,6 +557,9 @@ export class Emulator {
     // Save battery-backed RAM if the cartridge supports it (force save on exit)
     this.cartridge.saveSram(true);
 
+    // Save state on exit
+    this.saveState();
+
     // Remove resize handler
     if (this.resizeHandler) {
       process.stdout.off('resize', this.resizeHandler);
@@ -586,5 +608,110 @@ export class Emulator {
   // Get current frame buffer for external rendering
   getFrameBuffer(): Uint8Array {
     return this.ppu.frameBuffer;
+  }
+
+  // Save state management
+  private static readonly SAVE_STATE_VERSION = 1;
+
+  /**
+   * Get the path for the save state file
+   */
+  private getStatePath(): string {
+    return this.romPath.replace(/\.nes$/i, '.state');
+  }
+
+  /**
+   * Check if a save state exists for this ROM
+   */
+  hasSavedState(): boolean {
+    return existsSync(this.getStatePath());
+  }
+
+  /**
+   * Get the full emulator state for saving
+   */
+  getState(): SaveState {
+    return {
+      version: Emulator.SAVE_STATE_VERSION,
+      romPath: this.romPath,
+      cpu: this.cpu.getState(),
+      ppu: this.ppu.getState(),
+      apu: this.apu.getState(),
+      bus: this.bus.getState(),
+      cartridge: this.cartridge.getState(),
+      frameCount: this.frameCount,
+    };
+  }
+
+  /**
+   * Restore emulator state from a save state
+   */
+  setState(state: SaveState): void {
+    if (state.version !== Emulator.SAVE_STATE_VERSION) {
+      console.warn(`Save state version mismatch: expected ${Emulator.SAVE_STATE_VERSION}, got ${state.version}`);
+    }
+
+    this.cpu.setState(state.cpu);
+    this.ppu.setState(state.ppu);
+    this.apu.setState(state.apu);
+    this.bus.setState(state.bus);
+    this.cartridge.setState(state.cartridge);
+    this.frameCount = state.frameCount;
+  }
+
+  /**
+   * Save the current state to a .state file (gzipped JSON)
+   */
+  saveState(): void {
+    const statePath = this.getStatePath();
+    try {
+      const state = this.getState();
+      const json = JSON.stringify(state);
+      const compressed = gzipSync(json, { level: constants.Z_BEST_COMPRESSION });
+      writeFileSync(statePath, compressed);
+      console.log(`Saved state: ${statePath}`);
+    } catch (err) {
+      console.error(`Failed to save state: ${statePath}`, err);
+    }
+  }
+
+  /**
+   * Load state from a .state file (gzipped or plain JSON)
+   * @returns true if state was loaded successfully
+   */
+  loadState(): boolean {
+    const statePath = this.getStatePath();
+    if (!existsSync(statePath)) {
+      return false;
+    }
+
+    try {
+      const data = readFileSync(statePath);
+      // Check for gzip magic number (0x1f 0x8b)
+      const isGzipped = data[0] === 0x1f && data[1] === 0x8b;
+      const json = isGzipped ? gunzipSync(data).toString('utf-8') : data.toString('utf-8');
+      const state = JSON.parse(json) as SaveState;
+      this.setState(state);
+      console.log(`Loaded state: ${statePath}`);
+      return true;
+    } catch (err) {
+      console.error(`Failed to load state: ${statePath}`, err);
+      return false;
+    }
+  }
+
+  /**
+   * Delete the save state file
+   */
+  deleteSavedState(): void {
+    const statePath = this.getStatePath();
+    if (existsSync(statePath)) {
+      try {
+        const { unlinkSync } = require('fs');
+        unlinkSync(statePath);
+      } catch {
+        // Ignore errors when deleting
+      }
+    }
   }
 }

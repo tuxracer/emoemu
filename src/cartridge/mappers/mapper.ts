@@ -1,5 +1,9 @@
 import type { Cartridge } from '../cartridge.js';
 
+export interface MapperState {
+  [key: string]: unknown;
+}
+
 export interface Mapper {
   cpuRead(address: number): number;
   cpuWrite(address: number, data: number): void;
@@ -14,6 +18,10 @@ export interface Mapper {
   // Scanline counter notification (for MMC3)
   // Called by PPU at the point where scanline counter should clock
   notifyScanline?(scanline: number, renderingEnabled: boolean): void;
+
+  // State serialization for save states
+  getState(): MapperState;
+  setState(state: MapperState): void;
 }
 
 export function createMapper(mapperNumber: number, cartridge: Cartridge): Mapper {
@@ -81,6 +89,14 @@ export class Mapper0 implements Mapper {
     if (address < 0x2000 && this.cartridge.chrRom.length === 0) {
       this.cartridge.chrRam[address] = data;
     }
+  }
+
+  getState(): MapperState {
+    return {};
+  }
+
+  setState(_state: MapperState): void {
+    // No internal state to restore
   }
 }
 
@@ -230,6 +246,28 @@ export class Mapper1 implements Mapper {
       this.cartridge.chrRam[address] = data;
     }
   }
+
+  getState(): MapperState {
+    return {
+      shiftRegister: this.shiftRegister,
+      writeCount: this.writeCount,
+      control: this.control,
+      chrBank0: this.chrBank0,
+      chrBank1: this.chrBank1,
+      prgBank: this.prgBank,
+      mirrorMode: this.mirrorMode,
+    };
+  }
+
+  setState(state: MapperState): void {
+    this.shiftRegister = state.shiftRegister as number;
+    this.writeCount = state.writeCount as number;
+    this.control = state.control as number;
+    this.chrBank0 = state.chrBank0 as number;
+    this.chrBank1 = state.chrBank1 as number;
+    this.prgBank = state.prgBank as number;
+    this.mirrorMode = state.mirrorMode as number;
+  }
 }
 
 // Mapper 2: UxROM
@@ -279,6 +317,14 @@ export class Mapper2 implements Mapper {
       this.cartridge.chrRam[address] = data;
     }
   }
+
+  getState(): MapperState {
+    return { prgBank: this.prgBank };
+  }
+
+  setState(state: MapperState): void {
+    this.prgBank = state.prgBank as number;
+  }
 }
 
 // Mapper 3: CNROM
@@ -326,6 +372,14 @@ export class Mapper3 implements Mapper {
 
   ppuWrite(_address: number, _data: number): void {
     // CNROM uses CHR ROM, not RAM, so writes are ignored
+  }
+
+  getState(): MapperState {
+    return { chrBank: this.chrBank };
+  }
+
+  setState(state: MapperState): void {
+    this.chrBank = state.chrBank as number;
   }
 }
 
@@ -378,6 +432,15 @@ export class Mapper7 implements Mapper {
       // CHR RAM is writable
       this.cartridge.chrRam[address] = data;
     }
+  }
+
+  getState(): MapperState {
+    return { prgBank: this.prgBank, mirrorMode: this.mirrorMode };
+  }
+
+  setState(state: MapperState): void {
+    this.prgBank = state.prgBank as number;
+    this.mirrorMode = state.mirrorMode as number;
   }
 }
 
@@ -493,6 +556,30 @@ export class Mapper9 implements Mapper {
       // Reading tile $FE from pattern table 1
       this.latch1 = 1;
     }
+  }
+
+  getState(): MapperState {
+    return {
+      prgBank: this.prgBank,
+      chrBank0Latch0: this.chrBank0Latch0,
+      chrBank0Latch1: this.chrBank0Latch1,
+      chrBank1Latch0: this.chrBank1Latch0,
+      chrBank1Latch1: this.chrBank1Latch1,
+      latch0: this.latch0,
+      latch1: this.latch1,
+      mirrorMode: this.mirrorMode,
+    };
+  }
+
+  setState(state: MapperState): void {
+    this.prgBank = state.prgBank as number;
+    this.chrBank0Latch0 = state.chrBank0Latch0 as number;
+    this.chrBank0Latch1 = state.chrBank0Latch1 as number;
+    this.chrBank1Latch0 = state.chrBank1Latch0 as number;
+    this.chrBank1Latch1 = state.chrBank1Latch1 as number;
+    this.latch0 = state.latch0 as number;
+    this.latch1 = state.latch1 as number;
+    this.mirrorMode = state.mirrorMode as number;
   }
 }
 
@@ -718,5 +805,33 @@ export class Mapper4 implements Mapper {
    */
   acknowledgeIrq(): void {
     this.irqPendingFlag = false;
+  }
+
+  getState(): MapperState {
+    return {
+      bankRegisters: [...this.bankRegisters],
+      bankSelect: this.bankSelect,
+      prgBankMode: this.prgBankMode,
+      chrA12Inversion: this.chrA12Inversion,
+      mirrorMode: this.mirrorMode,
+      irqLatch: this.irqLatch,
+      irqCounter: this.irqCounter,
+      irqEnable: this.irqEnable,
+      irqReload: this.irqReload,
+      irqPendingFlag: this.irqPendingFlag,
+    };
+  }
+
+  setState(state: MapperState): void {
+    this.bankRegisters = [...(state.bankRegisters as number[])];
+    this.bankSelect = state.bankSelect as number;
+    this.prgBankMode = state.prgBankMode as number;
+    this.chrA12Inversion = state.chrA12Inversion as number;
+    this.mirrorMode = state.mirrorMode as number;
+    this.irqLatch = state.irqLatch as number;
+    this.irqCounter = state.irqCounter as number;
+    this.irqEnable = state.irqEnable as boolean;
+    this.irqReload = state.irqReload as boolean;
+    this.irqPendingFlag = state.irqPendingFlag as boolean;
   }
 }

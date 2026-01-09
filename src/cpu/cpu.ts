@@ -8,6 +8,8 @@ export interface CPUState {
   sp: number;     // Stack Pointer
   pc: number;     // Program Counter
   status: number; // Status Register (flags)
+  cycles: number;
+  totalCycles: number;
 }
 
 // Status register flags
@@ -169,6 +171,19 @@ export class CPU {
       sp: this.sp,
       pc: this.pc,
       status: this.status,
+      cycles: this.cycles,
+      totalCycles: this.totalCycles,
     };
+  }
+
+  setState(state: CPUState): void {
+    this.a = state.a;
+    this.x = state.x;
+    this.y = state.y;
+    this.sp = state.sp;
+    this.pc = state.pc;
+    this.status = state.status;
+    this.cycles = state.cycles;
+    this.totalCycles = state.totalCycles;
   }
 }

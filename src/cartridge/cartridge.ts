@@ -1,5 +1,11 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { Mapper, createMapper } from './mappers/mapper.js';
+import { Mapper, MapperState, createMapper } from './mappers/mapper.js';
+
+export interface CartridgeState {
+  prgRam: string;   // base64
+  chrRam: string;   // base64
+  mapper: MapperState;
+}
 
 export interface CartridgeHeader {
   prgRomBanks: number; // 16KB units
@@ -159,5 +165,21 @@ export class Cartridge {
     } catch (err) {
       console.error(`Failed to save game data: ${this.srmPath}`, err);
     }
+  }
+
+  getState(): CartridgeState {
+    return {
+      prgRam: Buffer.from(this.prgRam).toString('base64'),
+      chrRam: Buffer.from(this.chrRam).toString('base64'),
+      mapper: this.mapper.getState(),
+    };
+  }
+
+  setState(state: CartridgeState): void {
+    this.prgRam.set(new Uint8Array(Buffer.from(state.prgRam, 'base64')));
+    if (state.chrRam && this.chrRam.length > 0) {
+      this.chrRam.set(new Uint8Array(Buffer.from(state.chrRam, 'base64')));
+    }
+    this.mapper.setState(state.mapper);
   }
 }

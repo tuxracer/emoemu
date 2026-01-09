@@ -1,5 +1,26 @@
 import { Cartridge } from '../cartridge/cartridge.js';
 
+export interface PPUState {
+  frameBuffer: string;  // base64
+  vram: string;         // base64
+  paletteRam: string;   // base64
+  oam: string;          // base64
+  ctrl: number;
+  mask: number;
+  status: number;
+  oamAddr: number;
+  v: number;
+  t: number;
+  x: number;
+  w: boolean;
+  dataBuffer: number;
+  scanline: number;
+  cycle: number;
+  frameComplete: boolean;
+  nmiOccurred: boolean;
+  nmiOutput: boolean;
+}
+
 // Pre-computed bit reversal table for sprite horizontal flip
 // Eliminates 6 bit operations per sprite per scanline
 const REVERSE_BITS_TABLE = new Uint8Array(256);
@@ -687,5 +708,54 @@ export class PPU {
   private copyY(): void {
     // v: GHIA.BC DEF..... <- t: GHIA.BC DEF.....
     this.v = (this.v & 0x841f) | (this.t & 0x7be0);
+  }
+
+  getState(): PPUState {
+    return {
+      frameBuffer: Buffer.from(this.frameBuffer).toString('base64'),
+      vram: Buffer.from(this.vram).toString('base64'),
+      paletteRam: Buffer.from(this.paletteRam).toString('base64'),
+      oam: Buffer.from(this.oam).toString('base64'),
+      ctrl: this.ctrl,
+      mask: this.mask,
+      status: this.status,
+      oamAddr: this.oamAddr,
+      v: this.v,
+      t: this.t,
+      x: this.x,
+      w: this.w,
+      dataBuffer: this.dataBuffer,
+      scanline: this.scanline,
+      cycle: this.cycle,
+      frameComplete: this.frameComplete,
+      nmiOccurred: this.nmiOccurred,
+      nmiOutput: this.nmiOutput,
+    };
+  }
+
+  setState(state: PPUState): void {
+    this.frameBuffer.set(new Uint8Array(Buffer.from(state.frameBuffer, 'base64')));
+    this.vram.set(new Uint8Array(Buffer.from(state.vram, 'base64')));
+    this.paletteRam.set(new Uint8Array(Buffer.from(state.paletteRam, 'base64')));
+    this.oam.set(new Uint8Array(Buffer.from(state.oam, 'base64')));
+    this.ctrl = state.ctrl;
+    this.mask = state.mask;
+    this.status = state.status;
+    this.oamAddr = state.oamAddr;
+    this.v = state.v;
+    this.t = state.t;
+    this.x = state.x;
+    this.w = state.w;
+    this.dataBuffer = state.dataBuffer;
+    this.scanline = state.scanline;
+    this.cycle = state.cycle;
+    this.frameComplete = state.frameComplete;
+    this.nmiOccurred = state.nmiOccurred;
+    this.nmiOutput = state.nmiOutput;
+    // Reset internal sprite/tile caches - they'll be rebuilt
+    this.spriteCount = 0;
+    this.sprites = [];
+    this.spriteZeroOnLine = false;
+    this.tileCacheX = -1;
   }
 }

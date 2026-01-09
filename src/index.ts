@@ -1,8 +1,65 @@
 #!/usr/bin/env node
 
+import * as readline from 'readline';
 import { Emulator, RenderMode } from './emulator.js';
 import { GamepadManager } from './input/gamepad-manager.js';
 import HID from 'node-hid';
+import { existsSync, readFileSync } from 'fs';
+import { gunzipSync } from 'zlib';
+import type { SaveState } from './emulator.js';
+
+/**
+ * Validate a state file and return the parsed state if valid
+ * @returns The parsed SaveState if valid, null if invalid/corrupted
+ */
+function validateStateFile(statePath: string): SaveState | null {
+  if (!existsSync(statePath)) {
+    return null;
+  }
+
+  try {
+    const data = readFileSync(statePath);
+    // Check for gzip magic number (0x1f 0x8b)
+    const isGzipped = data[0] === 0x1f && data[1] === 0x8b;
+    const json = isGzipped ? gunzipSync(data).toString('utf-8') : data.toString('utf-8');
+    const state = JSON.parse(json) as SaveState;
+
+    // Basic validation - check required fields exist
+    if (!state.version || !state.cpu || !state.ppu || !state.bus) {
+      return null;
+    }
+
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Prompt the user with a yes/no question (defaults to yes on empty input)
+ */
+function askYesNo(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(`${question} [Y/n]: `, (answer) => {
+      rl.close();
+      const trimmed = answer.trim().toLowerCase();
+      // Default to yes if empty, otherwise check for explicit no
+      resolve(trimmed !== 'n' && trimmed !== 'no');
+    });
+  });
+}
+
+/**
+ * Get the save state path for a ROM
+ */
+function getStatePath(romPath: string): string {
+  return romPath.replace(/\.nes$/i, '.state');
+}
 
 function printUsage(): void {
   console.log(`
@@ -296,9 +353,29 @@ async function main(): Promise<void> {
   }
   console.log('');
   console.log('Press Escape or Ctrl+C to quit');
-  console.log('Starting in 2 seconds...');
 
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  // Check for saved state
+  const statePath = getStatePath(options.romPath);
+  const stateFileExists = existsSync(statePath);
+  const validState = stateFileExists ? validateStateFile(statePath) : null;
+  let shouldRestore = false;
+
+  if (stateFileExists && !validState) {
+    console.log('');
+    console.warn('Warning: A saved state file was found but appears to be corrupted or invalid.');
+    console.warn('The state file will be ignored and a fresh game will start.');
+    console.log('');
+  } else if (validState) {
+    console.log('');
+    console.log('A saved state was found for this ROM.');
+    shouldRestore = await askYesNo('Would you like to resume from where you left off?');
+    console.log('');
+  }
+
+  if (!shouldRestore) {
+    console.log('Starting in 2 seconds...');
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
 
   try {
     // Only pass explicit dimensions if user specified them (enables auto-resize otherwise)
@@ -316,7 +393,18 @@ async function main(): Promise<void> {
       showStatusBar: options.showStatusBar,
     });
 
-    await emulator.run();
+    let stateLoaded = false;
+    if (shouldRestore) {
+      stateLoaded = emulator.loadState();
+      if (stateLoaded) {
+        console.log('Resuming from saved state...');
+      } else {
+        console.log('Failed to load saved state, starting fresh...');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    await emulator.run(stateLoaded);
   } catch (error) {
     console.error('Error:', error instanceof Error ? error.message : error);
     process.exit(1);

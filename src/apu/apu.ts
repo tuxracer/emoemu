@@ -1,6 +1,15 @@
 // APU (Audio Processing Unit) - Full Implementation
 // NES APU has 5 channels: 2 pulse, 1 triangle, 1 noise, 1 DMC
 
+export interface APUState {
+  frameCounterMode: number;
+  frameIRQInhibit: boolean;
+  frameIRQPending: boolean;
+  cycleCount: number;
+  frameCycleCount: number;
+  frameStep: number;
+}
+
 // Length counter lookup table
 const LENGTH_TABLE = [
   10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14,
@@ -746,5 +755,33 @@ export class APU {
 
   getSampleRate(): number {
     return this.sampleRate;
+  }
+
+  getState(): APUState {
+    return {
+      frameCounterMode: this.frameCounterMode,
+      frameIRQInhibit: this.frameIRQInhibit,
+      frameIRQPending: this.frameIRQPending,
+      cycleCount: this.cycleCount,
+      frameCycleCount: this.frameCycleCount,
+      frameStep: this.frameStep,
+    };
+  }
+
+  setState(state: APUState): void {
+    this.frameCounterMode = state.frameCounterMode;
+    this.frameIRQInhibit = state.frameIRQInhibit;
+    this.frameIRQPending = state.frameIRQPending;
+    this.cycleCount = state.cycleCount;
+    this.frameCycleCount = state.frameCycleCount;
+    this.frameStep = state.frameStep;
+    // Reset audio channels - they'll regenerate audio from the restored game state
+    this.pulse1.setEnabled(false);
+    this.pulse2.setEnabled(false);
+    this.triangle.setEnabled(false);
+    this.noise.setEnabled(false);
+    this.dmc.setEnabled(false);
+    this.sampleCounter = 0;
+    this.sampleIndex = 0;
   }
 }

@@ -3,6 +3,12 @@ import { Cartridge } from '../cartridge/cartridge.js';
 import { Controller } from '../input/controller.js';
 import { APU } from '../apu/apu.js';
 
+export interface BusState {
+  ram: string;  // base64
+  dmaPage: number;
+  dmaTransfer: boolean;
+}
+
 export class Bus {
   // 2KB internal RAM
   private ram: Uint8Array = new Uint8Array(2048);
@@ -125,5 +131,19 @@ export class Bus {
   reset(): void {
     this.ram.fill(0);
     this.dmaTransfer = false;
+  }
+
+  getState(): BusState {
+    return {
+      ram: Buffer.from(this.ram).toString('base64'),
+      dmaPage: this.dmaPage,
+      dmaTransfer: this.dmaTransfer,
+    };
+  }
+
+  setState(state: BusState): void {
+    this.ram.set(new Uint8Array(Buffer.from(state.ram, 'base64')));
+    this.dmaPage = state.dmaPage;
+    this.dmaTransfer = state.dmaTransfer;
   }
 }
