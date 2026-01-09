@@ -1,6 +1,6 @@
 # TUI-NES - Terminal Retro Emulator
 
-A terminal-based multi-core emulator written in TypeScript that renders graphics using the Kitty graphics protocol, Unicode half-blocks, or ASCII characters. Currently supports NES with architecture designed for additional cores (GBA, SNES, etc.).
+A terminal-based multi-core emulator written in TypeScript that renders graphics using the Kitty graphics protocol, Unicode half-blocks, or ASCII characters. Currently supports NES and Game Boy Color with architecture designed for additional cores (GBA, SNES, etc.).
 
 ## Quick Reference
 
@@ -16,7 +16,7 @@ pnpm test              # Run tests
 ```
 src/
 ├── index.ts              # CLI entry point, argument parsing
-├── emulator.ts           # Main emulation loop (NES-specific, legacy)
+├── emulator.ts           # Main emulation loop, renderer orchestration
 │
 ├── core/                 # Multi-core interface definitions
 │   ├── core.ts           # Core interface, SystemInfo, AudioConfig, CoreState
@@ -26,21 +26,30 @@ src/
 ├── frontend/             # Shared frontend infrastructure
 │   ├── core-registry.ts  # Core discovery and instantiation
 │   ├── audio.ts          # AudioManager (RtAudio wrapper)
-│   ├── state-manager.ts  # Save/load state handling
+│   ├── state-manager.ts  # Save/load state handling with gzip compression
 │   └── index.ts          # Module exports
 │
 ├── cores/                # System-specific emulation cores
-│   └── nes/
-│       ├── index.ts      # NESCore class (implements Core interface)
-│       ├── cpu.ts        # 6502 CPU with registers, interrupts
-│       ├── opcodes.ts    # All 151 official opcodes
-│       ├── addressing.ts # 13 addressing modes
-│       ├── ppu.ts        # PPU with background/sprite rendering
-│       ├── apu.ts        # APU with all 5 channels
-│       ├── bus.ts        # Memory bus, address decoding, DMA
-│       ├── cartridge.ts  # iNES ROM parsing, mapper instantiation
-│       └── mappers/
-│           └── mapper.ts # All mappers: 0, 1, 2, 3, 4, 7, 9
+│   ├── nes/
+│   │   ├── index.ts      # NESCore class (implements Core interface)
+│   │   ├── cpu.ts        # 6502 CPU with registers, interrupts
+│   │   ├── opcodes.ts    # All 151 official opcodes
+│   │   ├── addressing.ts # 13 addressing modes
+│   │   ├── ppu.ts        # PPU with background/sprite rendering
+│   │   ├── apu.ts        # APU with all 5 channels
+│   │   ├── bus.ts        # Memory bus, address decoding, DMA
+│   │   ├── cartridge.ts  # iNES ROM parsing, mapper instantiation
+│   │   └── mappers/
+│   │       └── mapper.ts # All mappers: 0, 1, 2, 3, 4, 7, 9
+│   │
+│   └── gbc/              # Game Boy Color core
+│       ├── index.ts      # GBCCore class (implements Core interface)
+│       ├── cpu.ts        # Sharp LR35902 CPU (Z80-like)
+│       ├── ppu.ts        # PPU with tile/sprite rendering, CGB palettes
+│       ├── apu.ts        # APU with 4 channels, stereo output
+│       ├── bus.ts        # Memory bus, I/O registers, speed switching
+│       ├── timer.ts      # Timer/divider registers (DIV, TIMA, TMA, TAC)
+│       └── cartridge.ts  # ROM parsing, MBC1/2/3/5 mappers
 │
 ├── input/                # Input handling (shared)
 │   ├── controller.ts     # NES controller shift register emulation
@@ -69,16 +78,51 @@ All system emulators implement the `Core` interface:
 
 ```typescript
 interface Core {
-  getSystemInfo(): SystemInfo;    // Capabilities (resolution, fps, buttons)
+  // Lifecycle
+  getSystemInfo(): SystemInfo;    // Capabilities (resolution, fps, buttons, colorSpace)
   loadRom(romPath: string): void;
   reset(): void;
   destroy(): void;
+
+  // Emulation
   runFrame(): void;               // Run one frame of emulation
-  getFramebuffer(): Uint8Array;   // Get video output
+  isFrameComplete(): boolean;     // Check if frame finished (variable timing)
+
+  // Video Output
+  getFramebuffer(): Uint8Array | Uint16Array;  // Format per colorSpace
+
+  // Audio Output
+  getAudioConfig(): AudioConfig;  // { sampleRate, channels: 1|2 }
   setAudioCallback(cb): void;     // Wire audio output
-  setButtonState(port, btn, pressed): void;  // Input
+
+  // Input
+  setButtonState(port, btn, pressed): void;
+  getButtonState(port): Map<number, boolean>;
+
+  // State Management
   getState(): CoreState;          // Save state
   setState(state: CoreState): void;
+  getStateVersion(): number;
+
+  // Battery/SRAM (optional)
+  hasBatterySave(): boolean;
+  getBatteryRam(): Uint8Array | null;
+  setBatteryRam(data: Uint8Array): void;
+}
+
+interface SystemInfo {
+  id: string;                     // "nes", "gbc"
+  name: string;                   // Human-readable name
+  extensions: string[];           // [".nes"], [".gbc", ".gb"]
+  width: number;                  // Native framebuffer width
+  height: number;                 // Native framebuffer height
+  fps: number;                    // Target FPS
+  sampleRate: number;             // Audio sample rate
+  pixelAspectRatio: number;       // For correct display aspect
+  maxPlayers: number;             // Controller ports
+  buttons: ButtonDefinition[];    // Input definitions
+  colorSpace: 'palette' | 'rgb15' | 'rgb24';  // Framebuffer format
+  palette?: Uint8Array;           // For palette mode
 }
 ```
 
@@ -178,6 +222,73 @@ $6000-$7FFF  PRG RAM (battery-backed)
 $8000-$FFFF  PRG ROM (mapper-controlled)
 ```
 
+## GBC Core Details
+
+### System Specs
+
+- **Resolution**: 160x144 pixels
+- **Frame rate**: 59.7275 fps (4194304 Hz / 70224 cycles per frame)
+- **Color space**: RGB15 (15-bit color, xBBBBBGGGGGRRRRR)
+- **Audio**: Stereo, 44100 Hz sample rate
+
+### CPU (`cores/gbc/cpu.ts`)
+
+- Sharp LR35902 (Z80-like with differences)
+- Registers: A, F (flags), B, C, D, E, H, L (8-bit), SP, PC (16-bit)
+- Flags: Z (zero), N (subtract), H (half-carry), C (carry)
+- Interrupts: VBlank, LCD STAT, Timer, Serial, Joypad
+- CGB double-speed mode support
+
+### PPU (`cores/gbc/ppu.ts`)
+
+- 160x144 framebuffer (RGB15 format)
+- Tile-based rendering with 8x8 tiles
+- Background: 32x32 tile maps, scrolling support
+- Window: overlay layer with separate position
+- Sprites: 40 in OAM, 10 per scanline limit
+- CGB features: 8 background palettes, 8 sprite palettes, VRAM banks
+
+### APU (`cores/gbc/apu.ts`)
+
+- **Channel 1**: Square wave with sweep, envelope
+- **Channel 2**: Square wave with envelope
+- **Channel 3**: Programmable wave (32 samples)
+- **Channel 4**: Noise with LFSR
+- Stereo panning per channel
+- Audio output: 44100 Hz, 2 channels
+
+### Timer (`cores/gbc/timer.ts`)
+
+- DIV: Divider register (increments at 16384 Hz)
+- TIMA: Timer counter
+- TMA: Timer modulo (reload value)
+- TAC: Timer control (enable, frequency select)
+
+### Cartridge/MBC (`cores/gbc/cartridge.ts`)
+
+Memory Bank Controllers implemented:
+- **No MBC**: Direct ROM access (32KB max)
+- **MBC1**: Up to 2MB ROM, 32KB RAM, banking modes
+- **MBC2**: Up to 256KB ROM, 512×4 bits internal RAM
+- **MBC3**: Up to 2MB ROM, 32KB RAM, RTC support
+- **MBC5**: Up to 8MB ROM, 128KB RAM
+
+### GBC Memory Map
+
+```
+$0000-$3FFF  ROM Bank 0 (fixed)
+$4000-$7FFF  ROM Bank 1-N (switchable)
+$8000-$9FFF  VRAM (CGB: 2 banks)
+$A000-$BFFF  External RAM (cartridge)
+$C000-$CFFF  WRAM Bank 0
+$D000-$DFFF  WRAM Bank 1-7 (CGB switchable)
+$E000-$FDFF  Echo RAM (mirrors $C000-$DDFF)
+$FE00-$FE9F  OAM (sprite attribute table)
+$FF00-$FF7F  I/O Registers
+$FF80-$FFFE  High RAM (HRAM)
+$FFFF       Interrupt Enable
+```
+
 ## Input System
 
 **Keyboard** (`input/input-manager.ts`):
@@ -213,6 +324,8 @@ $8000-$FFFF  PRG ROM (mapper-controlled)
 ```
 tui-nes <rom> [options]
 
+Supported ROM formats: .nes, .gbc, .gb
+
 Core Selection:
   --core <id>       Use specific core (see --list-cores)
   --list-cores      Show available emulator cores
@@ -232,6 +345,9 @@ Input:
 
 Audio:
   --no-audio        Disable audio output
+
+Display:
+  --no-status       Hide the status bar
 ```
 
 ## Key Implementation Details
@@ -265,16 +381,24 @@ Use nestest.nes ROM for CPU verification.
 
 ## Dependencies
 
+- **audify**: Audio output (RtAudio bindings)
 - **chalk**: Terminal colors
 - **node-hid**: HID device access for gamepads
-- **audify**: Audio output (RtAudio bindings)
+
+**Node.js Requirement**: >= 24.0.0
 
 ## Common Tasks
 
-### Adding a New Mapper
+### Adding a New NES Mapper
 1. Add case to `createMapper()` switch in `cores/nes/mappers/mapper.ts`
 2. Implement `Mapper` interface with bank switching logic
 3. If IRQ needed, implement `irqPending()` and `acknowledgeIrq()`
+
+### Adding a New GBC MBC
+1. Add new MBCType enum value in `cores/gbc/cartridge.ts`
+2. Add cartridge type mapping in `parseHeader()`
+3. Implement read/write logic in `read()` and `write()` methods
+4. Handle RAM enable/bank switching as needed
 
 ### Adding a New Core
 1. Create directory `src/cores/<system>/`
@@ -282,11 +406,18 @@ Use nestest.nes ROM for CPU verification.
 3. Register with `registerCore()` in your core's `index.ts`
 4. Import core module in `src/index.ts` to auto-register
 
-### Debugging Graphics Issues
+### Debugging NES Graphics Issues
 - Check nametable mirroring (mapper's `mirrorMode`)
 - Verify scroll register handling (v/t manipulation)
 - Check pattern table address calculation
 - Sprite 0 hit requires both BG and sprite pixels opaque
+
+### Debugging GBC Issues
+- Verify MBC type detection from cartridge header ($0147)
+- Check ROM/RAM bank switching logic
+- For CGB games, ensure double-speed mode handling
+- Timer issues: verify DIV increments and TIMA overflow behavior
+- PPU: check VRAM bank selection for CGB mode
 
 ### Debugging Input Issues
 - Use `--debug-gamepad` to see raw HID bytes
