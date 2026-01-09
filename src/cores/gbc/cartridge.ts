@@ -16,11 +16,23 @@ export interface CartridgeState {
 }
 
 // Cartridge header constants
+const HEADER_LOGO = 0x0104;
 const HEADER_TITLE = 0x0134;
 const HEADER_CGB_FLAG = 0x0143;
 const HEADER_CARTRIDGE_TYPE = 0x0147;
 const HEADER_ROM_SIZE = 0x0148;
 const HEADER_RAM_SIZE = 0x0149;
+const HEADER_CHECKSUM = 0x014d;
+
+// Nintendo logo that must be present in valid ROMs (48 bytes at $0104-$0133)
+const NINTENDO_LOGO = new Uint8Array([
+  0xce, 0xed, 0x66, 0x66, 0xcc, 0x0d, 0x00, 0x0b,
+  0x03, 0x73, 0x00, 0x83, 0x00, 0x0c, 0x00, 0x0d,
+  0x00, 0x08, 0x11, 0x1f, 0x88, 0x89, 0x00, 0x0e,
+  0xdc, 0xcc, 0x6e, 0xe6, 0xdd, 0xdd, 0xd9, 0x99,
+  0xbb, 0xbb, 0x67, 0x63, 0x6e, 0x0e, 0xec, 0xcc,
+  0xdd, 0xdc, 0x99, 0x9f, 0xbb, 0xb9, 0x33, 0x3e,
+]);
 
 // MBC types
 enum MBCType {
@@ -68,11 +80,53 @@ export class Cartridge {
 
     this.rom = new Uint8Array(data);
 
+    // Validate ROM before parsing
+    this.validateRom(romPath);
+
     // Parse header
     this.parseHeader();
 
     // Initialize RAM based on header
     this.ram = new Uint8Array(this.ramSize);
+  }
+
+  private validateRom(romPath: string): void {
+    // Check minimum size (must have at least the header area up to $014F)
+    if (this.rom.length < 0x150) {
+      throw new Error(
+        `Invalid Game Boy ROM: File too small (${this.rom.length} bytes). ` +
+        `Expected at least 336 bytes for a valid ROM header.`
+      );
+    }
+
+    // Validate Nintendo logo ($0104-$0133)
+    let logoMatch = true;
+    for (let i = 0; i < NINTENDO_LOGO.length; i++) {
+      if (this.rom[HEADER_LOGO + i] !== NINTENDO_LOGO[i]) {
+        logoMatch = false;
+        break;
+      }
+    }
+    if (!logoMatch) {
+      throw new Error(
+        `Invalid Game Boy ROM: Nintendo logo check failed. ` +
+        `The file "${romPath}" does not appear to be a valid Game Boy/Game Boy Color ROM.`
+      );
+    }
+
+    // Validate header checksum ($014D)
+    // Checksum = sum of bytes $0134-$014C, then x = 0 - x - 1
+    let checksum = 0;
+    for (let addr = 0x0134; addr <= 0x014c; addr++) {
+      checksum = (checksum - this.rom[addr] - 1) & 0xff;
+    }
+    if (checksum !== this.rom[HEADER_CHECKSUM]) {
+      throw new Error(
+        `Invalid Game Boy ROM: Header checksum mismatch. ` +
+        `Expected ${this.rom[HEADER_CHECKSUM].toString(16).padStart(2, '0')}, ` +
+        `got ${checksum.toString(16).padStart(2, '0')}.`
+      );
+    }
   }
 
   private parseHeader(): void {
