@@ -63,8 +63,8 @@ function calculateTerminalDimensions(
   // displayAspect = (sourceWidth * PAR) / sourceHeight
   const displayAspect = (sourceWidth * pixelAspectRatio) / sourceHeight;
 
-  // Terminal cells are roughly 1:2 (width:height)
-  const cellAspect = 0.5; // width / height of a terminal cell
+  // Terminal cells are roughly 1:2 (width:height), so we multiply by 2 below
+  // to compensate when calculating character columns from pixel dimensions
 
   if (mode === 'emoji') {
     // Emoji: 1 emoji = 1 pixel, each emoji is 2 terminal columns wide
