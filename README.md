@@ -93,6 +93,16 @@ tui-nes game.nes --debug-gamepad  # Debug raw HID data
 tui-nes game.nes --no-gamepad     # Disable gamepad support
 ```
 
+### Save Data
+
+```bash
+tui-nes game.nes                  # Auto-save state and battery saves (default)
+tui-nes game.nes --no-save-state  # Disable save state loading/saving
+tui-nes game.nes --no-battery-save # Disable battery save (.srm) loading/saving
+```
+
+Save states (`.state` files) capture the full emulator state and are saved automatically on exit. Battery saves (`.srm` files) store cartridge SRAM for games with battery-backed saves (e.g., Zelda, Pokemon). Both use RetroArch-compatible formats.
+
 ## Controls
 
 ### Keyboard
