@@ -585,6 +585,9 @@ async function main(): Promise<void> {
       console.log("Resuming from saved state...");
       shouldRestore = true;
     }
+  } else {
+    console.log("");
+    console.warn("Save states disabled. Progress will not be saved.");
   }
 
   try {
