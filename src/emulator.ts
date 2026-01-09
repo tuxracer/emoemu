@@ -1,15 +1,15 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { gzipSync, gunzipSync, constants } from 'zlib';
-import { CPU, CPUState } from './cpu/cpu.js';
-import { PPU, PPUState } from './ppu/ppu.js';
-import { Bus, BusState } from './memory/bus.js';
-import { Cartridge, CartridgeState } from './cartridge/cartridge.js';
+import { CPU, CPUState } from './cores/nes/cpu.js';
+import { PPU, PPUState } from './cores/nes/ppu.js';
+import { Bus, BusState } from './cores/nes/bus.js';
+import { Cartridge, CartridgeState } from './cores/nes/cartridge.js';
 import { Controller, Button } from './input/controller.js';
 import { InputManager } from './input/input-manager.js';
 import { GamepadManager } from './input/gamepad-manager.js';
-import { TerminalRenderer } from './ppu/renderer.js';
-import { KittyRenderer } from './ppu/kitty-renderer.js';
-import { APU, APUState } from './apu/apu.js';
+import { TerminalRenderer } from './rendering/renderer.js';
+import { KittyRenderer } from './rendering/kitty-renderer.js';
+import { APU, APUState } from './cores/nes/apu.js';
 import pkg from 'audify';
 const { RtAudio, RtAudioFormat } = pkg;
 

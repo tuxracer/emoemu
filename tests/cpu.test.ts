@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { CPU, Flag } from '../src/cpu/cpu.js';
-import { Bus } from '../src/memory/bus.js';
+import { CPU, Flag } from '../src/cores/nes/cpu.js';
+import { Bus } from '../src/cores/nes/bus.js';
 
 describe('CPU', () => {
   let bus: Bus;

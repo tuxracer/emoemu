@@ -20,7 +20,7 @@ import { APU } from './apu.js';
 import { Bus } from './bus.js';
 import { Cartridge } from './cartridge.js';
 import { Controller, Button } from '../../input/controller.js';
-import { nesPaletteFlat } from '../../ppu/palette.js';
+import { nesPaletteFlat } from '../../rendering/palette.js';
 
 /**
  * NES button IDs (matches the Button enum from controller.ts)
