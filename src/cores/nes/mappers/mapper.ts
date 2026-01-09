@@ -71,7 +71,6 @@ export class Mapper0 implements Mapper {
     if (address >= 0x6000 && address < 0x8000) {
       // PRG RAM
       this.cartridge.prgRam[address & 0x1fff] = data;
-      this.cartridge.sramDirty = true;
     }
   }
 
@@ -210,7 +209,6 @@ export class Mapper1 implements Mapper {
       }
     } else if (address >= 0x6000) {
       this.cartridge.prgRam[address & 0x1fff] = data;
-      this.cartridge.sramDirty = true;
     }
   }
 
@@ -298,7 +296,6 @@ export class Mapper2 implements Mapper {
       this.prgBank = data & 0x0f;
     } else if (address >= 0x6000) {
       this.cartridge.prgRam[address & 0x1fff] = data;
-      this.cartridge.sramDirty = true;
     }
   }
 
@@ -358,7 +355,6 @@ export class Mapper3 implements Mapper {
     } else if (address >= 0x6000) {
       // PRG RAM
       this.cartridge.prgRam[address & 0x1fff] = data;
-      this.cartridge.sramDirty = true;
     }
   }
 
@@ -415,7 +411,6 @@ export class Mapper7 implements Mapper {
       this.mirrorMode = (data & 0x10) ? 3 : 2;
     } else if (address >= 0x6000) {
       this.cartridge.prgRam[address & 0x1fff] = data;
-      this.cartridge.sramDirty = true;
     }
   }
 
@@ -504,7 +499,6 @@ export class Mapper9 implements Mapper {
       this.prgBank = data & 0x0f;
     } else if (address >= 0x6000) {
       this.cartridge.prgRam[address & 0x1fff] = data;
-      this.cartridge.sramDirty = true;
     }
   }
 
@@ -691,7 +685,6 @@ export class Mapper4 implements Mapper {
     } else if (address >= 0x6000) {
       // PRG RAM write
       this.cartridge.prgRam[address & 0x1fff] = data;
-      this.cartridge.sramDirty = true;
     }
   }
 

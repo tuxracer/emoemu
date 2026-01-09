@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import { Mapper, MapperState, createMapper } from './mappers/mapper.js';
 
 export interface CartridgeState {
@@ -22,10 +22,8 @@ export class Cartridge {
   chrRom: Uint8Array;
   prgRam: Uint8Array;
   chrRam: Uint8Array;
-  sramDirty: boolean = false;  // Set by mappers when PRG RAM is written
 
   private mapper: Mapper;
-  private srmPath: string;
 
   get mirrorMode(): number {
     return this.mapper.mirrorMode ?? this.header.mirrorMode;
@@ -37,9 +35,6 @@ export class Cartridge {
 
     // Parse iNES header
     this.header = this.parseHeader(buffer);
-
-    // Calculate .srm path (same as ROM path but with .srm extension)
-    this.srmPath = romPath.replace(/\.nes$/i, '.srm');
 
     // Calculate offsets
     const trainerOffset = this.header.hasTrainer ? 512 : 0;
@@ -62,20 +57,6 @@ export class Cartridge {
 
     // PRG RAM (battery-backed or not)
     this.prgRam = new Uint8Array(8192);
-
-    // Load battery-backed save data if it exists
-    if (this.header.hasBattery && existsSync(this.srmPath)) {
-      try {
-        const srmData = readFileSync(this.srmPath);
-        const srmBuffer = new Uint8Array(srmData);
-        // Copy save data to PRG RAM (up to 8KB)
-        const copySize = Math.min(srmBuffer.length, this.prgRam.length);
-        this.prgRam.set(srmBuffer.subarray(0, copySize));
-        console.log(`Loaded save data: ${this.srmPath}`);
-      } catch {
-        console.warn(`Failed to load save data: ${this.srmPath}`);
-      }
-    }
 
     // Create mapper
     this.mapper = createMapper(this.header.mapper, this);
@@ -143,28 +124,6 @@ export class Cartridge {
    */
   notifyScanline(scanline: number, renderingEnabled: boolean): void {
     this.mapper.notifyScanline?.(scanline, renderingEnabled);
-  }
-
-  /**
-   * Save battery-backed RAM to .srm file
-   * @param force - If true, save even if not dirty (used on shutdown)
-   */
-  saveSram(force: boolean = false): void {
-    if (!this.header.hasBattery) {
-      return;
-    }
-
-    if (!force && !this.sramDirty) {
-      return;
-    }
-
-    try {
-      writeFileSync(this.srmPath, this.prgRam);
-      this.sramDirty = false;
-      console.log(`Saved game data: ${this.srmPath}`);
-    } catch (err) {
-      console.error(`Failed to save game data: ${this.srmPath}`, err);
-    }
   }
 
   getState(): CartridgeState {

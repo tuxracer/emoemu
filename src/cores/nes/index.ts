@@ -171,9 +171,6 @@ export class NESCore implements Core {
    * Clean up resources
    */
   destroy(): void {
-    // Save battery-backed RAM if needed
-    this.cartridge?.saveSram(true);
-
     // Clear audio callback
     if (this.apu) {
       this.apu.onSamplesReady = null;
