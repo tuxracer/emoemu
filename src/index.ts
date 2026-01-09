@@ -36,7 +36,7 @@ function validateStateFile(statePath: string): SaveState | null {
     const state = JSON.parse(json) as SaveState;
 
     // Basic validation - check required fields exist
-    if (!state.version || !state.cpu || !state.ppu || !state.bus) {
+    if (!state.version || !state.coreState) {
       return null;
     }
 
@@ -540,6 +540,7 @@ async function main(): Promise<void> {
 
     const emulator = new Emulator({
       romPath: options.romPath,
+      coreFactory: coreFactory,
       width: explicitDimensions ? displaySize.width : undefined,
       height: explicitDimensions ? displaySize.height : undefined,
       useColor: options.useColor,

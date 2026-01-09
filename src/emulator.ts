@@ -1,26 +1,19 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { gzipSync, gunzipSync, constants } from 'zlib';
-import { CPU, CPUState } from './cores/nes/cpu.js';
-import { PPU, PPUState } from './cores/nes/ppu.js';
-import { Bus, BusState } from './cores/nes/bus.js';
-import { Cartridge, CartridgeState } from './cores/nes/cartridge.js';
 import { Controller, Button } from './input/controller.js';
 import { InputManager } from './input/input-manager.js';
 import { GamepadManager } from './input/gamepad-manager.js';
 import { TerminalRenderer } from './rendering/renderer.js';
 import { KittyRenderer } from './rendering/kitty-renderer.js';
-import { APU, APUState } from './cores/nes/apu.js';
+import type { Core, CoreState, SystemInfo } from './core/core.js';
+import type { CoreFactory } from './frontend/core-registry.js';
 import pkg from 'audify';
 const { RtAudio, RtAudioFormat } = pkg;
 
 export interface SaveState {
   version: number;
   romPath: string;
-  cpu: CPUState;
-  ppu: PPUState;
-  apu: APUState;
-  bus: BusState;
-  cartridge: CartridgeState;
+  coreState: CoreState;
   frameCount: number;
 }
 
@@ -39,6 +32,7 @@ interface Renderer {
 
 export interface EmulatorOptions {
   romPath: string;
+  coreFactory: CoreFactory;  // Core factory for creating the emulator core
   width?: number;
   height?: number;
   useColor?: boolean;
@@ -109,17 +103,14 @@ function calculateTerminalDimensions(mode: 'terminal' | 'ascii' | 'emoji'): { wi
 }
 
 export class Emulator {
-  private cpu: CPU;
-  private ppu: PPU;
-  private bus: Bus;
-  private cartridge: Cartridge;
+  private core: Core;
+  private systemInfo: SystemInfo;
   private controller1: Controller;
   private controller2: Controller;
   private inputManager: InputManager;
   private gamepadManager: GamepadManager | null = null;
   private renderer: Renderer;
   private renderMode: RenderMode;
-  private apu: APU;
   private rtAudio: InstanceType<typeof RtAudio> | null = null;
   private audioEnabled: boolean = true;
   private autoResize: boolean = false; // Whether to handle terminal resize events
@@ -129,7 +120,7 @@ export class Emulator {
   private running: boolean = false;
   private frameCount: number = 0;
   private lastFrameTime: number = 0;
-  private targetFrameTime: number = 1000 / 60; // ~16.67ms for 60 FPS
+  private targetFrameTime: number; // Set based on core's FPS
   private resizeHandler: (() => void) | null = null;
   private inputHandler: ((key: string) => void) | null = null;
   private autoSaveInterval: ReturnType<typeof setInterval> | null = null;
@@ -139,24 +130,19 @@ export class Emulator {
     // Store ROM path for save states
     this.romPath = options.romPath;
 
-    // Initialize components
-    this.cartridge = new Cartridge(options.romPath);
-    this.bus = new Bus();
-    this.ppu = new PPU();
-    this.cpu = new CPU(this.bus);
+    // Create core and load ROM
+    this.core = options.coreFactory.create();
+    this.systemInfo = this.core.getSystemInfo();
+    this.core.loadRom(options.romPath);
+
+    // Set target frame time based on core's FPS
+    this.targetFrameTime = 1000 / this.systemInfo.fps;
+
+    // Initialize controllers (used for NES-style input mapping)
     this.controller1 = new Controller();
     this.controller2 = new Controller();
-    this.apu = new APU();
     this.audioEnabled = options.enableAudio !== false;
     this.showStatusBar = options.showStatusBar !== false;
-
-    // Connect components
-    this.bus.connectPPU(this.ppu);
-    this.bus.connectCartridge(this.cartridge);
-    this.bus.connectController(1, this.controller1);
-    this.bus.connectController(2, this.controller2);
-    this.bus.connectAPU(this.apu);
-    this.ppu.connectCartridge(this.cartridge);
 
     // Initialize input manager with controllers
     this.inputManager = new InputManager(this.controller1, this.controller2);
@@ -217,68 +203,104 @@ export class Emulator {
   }
 
   reset(): void {
-    this.cpu.reset();
-    this.ppu.reset();
-    this.apu.reset();
-    this.bus.reset();
+    this.core.reset();
     this.frameCount = 0;
-  }
-
-  // Run one CPU instruction and corresponding PPU cycles
-  step(): void {
-    // Execute one CPU instruction
-    const cpuCycles = this.cpu.step();
-
-    // PPU runs 3 times faster than CPU
-    for (let i = 0; i < cpuCycles * 3; i++) {
-      this.ppu.clock();
-
-      // Check for NMI (only trigger once)
-      if (this.ppu.shouldGenerateNMI()) {
-        this.ppu.clearNMI();
-        this.cpu.nmi();
-      }
-
-      // Check for mapper IRQ each PPU cycle (used by MMC3 scanline counter)
-      // This allows more accurate IRQ timing
-      if (this.cartridge.irqPending()) {
-        this.cpu.irq();
-        // Don't acknowledge here - let the game do it by writing to $E000
-      }
-    }
-
-    // APU runs at CPU speed
-    for (let i = 0; i < cpuCycles; i++) {
-      this.apu.clock();
-    }
-
-    // Check for APU IRQ
-    if (this.apu.irqPending()) {
-      this.cpu.irq();
-    }
-
-    // Handle DMA if needed
-    const dma = this.bus.doDma();
-    if (dma.active && dma.data) {
-      this.ppu.oamDma(dma.data);
-      // DMA takes 513 or 514 cycles - simplified here
-    }
   }
 
   // Run one complete frame
   runFrame(): void {
-    this.ppu.frameComplete = false;
+    // Sync input state from controllers to core
+    this.syncInputToCore();
 
-    while (!this.ppu.frameComplete) {
-      this.step();
-    }
+    // Run the core for one frame
+    this.core.runFrame();
 
     this.frameCount++;
   }
 
+  // Sync controller state to core's input system
+  private syncInputToCore(): void {
+    const buttons = this.systemInfo.buttons;
+
+    // Map controller buttons to core buttons
+    for (const buttonDef of buttons) {
+      // Try to find a matching controller button
+      let pressed = false;
+
+      // Map common button names
+      switch (buttonDef.name.toLowerCase()) {
+        case 'a':
+          pressed = this.controller1.getButton(Button.A);
+          break;
+        case 'b':
+          pressed = this.controller1.getButton(Button.B);
+          break;
+        case 'start':
+          pressed = this.controller1.getButton(Button.Start);
+          break;
+        case 'select':
+          pressed = this.controller1.getButton(Button.Select);
+          break;
+        case 'up':
+          pressed = this.controller1.getButton(Button.Up);
+          break;
+        case 'down':
+          pressed = this.controller1.getButton(Button.Down);
+          break;
+        case 'left':
+          pressed = this.controller1.getButton(Button.Left);
+          break;
+        case 'right':
+          pressed = this.controller1.getButton(Button.Right);
+          break;
+        // GBA-specific buttons (L/R) - map to controller's optional buttons if available
+        case 'l':
+          // Could be mapped to a specific key
+          break;
+        case 'r':
+          // Could be mapped to a specific key
+          break;
+      }
+
+      this.core.setButtonState(0, buttonDef.id, pressed);
+    }
+  }
+
   // Render current frame to terminal
   renderFrame(): string {
-    return this.renderer.render(this.ppu.frameBuffer);
+    const framebuffer = this.core.getFramebuffer();
+
+    // Convert framebuffer based on color space
+    if (this.systemInfo.colorSpace === 'rgb15') {
+      // GBA uses 15-bit RGB - convert to palette indices for renderer
+      // For now, render as-is (renderer will need to be updated to handle rgb15)
+      return this.renderer.render(this.convertRgb15ToPalette(framebuffer as Uint16Array));
+    } else {
+      // NES uses palette indices
+      return this.renderer.render(framebuffer as Uint8Array);
+    }
+  }
+
+  // Convert RGB15 framebuffer to 8-bit indexed for terminal rendering
+  private convertRgb15ToPalette(rgb15: Uint16Array): Uint8Array {
+    // Create a grayscale-ish approximation for terminal rendering
+    // This is a simplified conversion - proper rendering would need RGB support
+    const width = this.systemInfo.width;
+    const height = this.systemInfo.height;
+    const output = new Uint8Array(width * height);
+
+    for (let i = 0; i < rgb15.length; i++) {
+      const color = rgb15[i];
+      const r = (color & 0x1F) << 3;
+      const g = ((color >> 5) & 0x1F) << 3;
+      const b = ((color >> 10) & 0x1F) << 3;
+
+      // Convert to grayscale luminance and map to palette index 0-63
+      const lum = (r * 0.299 + g * 0.587 + b * 0.114);
+      output[i] = Math.floor(lum / 4); // Map 0-255 to 0-63
+    }
+
+    return output;
   }
 
   // Main emulation loop
@@ -327,10 +349,15 @@ export class Emulator {
       process.stdout.on('resize', this.resizeHandler);
     }
 
-    // Set up auto-save for battery-backed games
-    if (this.cartridge.header.hasBattery) {
+    // Set up auto-save for battery-backed games (core handles its own periodic saves,
+    // but this ensures saves on a timer in case of crash)
+    if (this.core.hasBatterySave()) {
       this.autoSaveInterval = setInterval(() => {
-        this.cartridge.saveSram();
+        // Get and set battery RAM to trigger save through core
+        const batteryRam = this.core.getBatteryRam();
+        if (batteryRam) {
+          this.core.setBatteryRam(batteryRam);
+        }
       }, Emulator.AUTO_SAVE_INTERVAL_MS);
     }
 
@@ -383,7 +410,8 @@ export class Emulator {
   }
 
   private setupAudio(): void {
-    const sampleRate = this.apu.getSampleRate();
+    const audioConfig = this.core.getAudioConfig();
+    const sampleRate = audioConfig.sampleRate;
     // Frame size for audio buffer (~10ms at sample rate for low latency)
     const frameSize = Math.floor(sampleRate * 0.01);
     // Buffer size in bytes (16-bit stereo = 4 bytes per sample frame)
@@ -524,8 +552,8 @@ export class Emulator {
       }
     };
 
-    // Connect APU sample output to RtAudio
-    this.apu.onSamplesReady = (samples: Float32Array) => {
+    // Connect core's audio output to RtAudio
+    this.core.setAudioCallback((samples: Float32Array) => {
       if (!this.rtAudio || !this.audioEnabled) return;
 
       // Add incoming samples to ring buffer
@@ -543,7 +571,7 @@ export class Emulator {
 
       // Write complete frames to RtAudio's queue
       tryWriteFrames();
-    };
+    });
   }
 
   private setupStdin(): void {
@@ -647,8 +675,8 @@ export class Emulator {
       this.autoSaveInterval = null;
     }
 
-    // Save battery-backed RAM if the cartridge supports it (force save on exit)
-    this.cartridge.saveSram(true);
+    // Destroy core (handles battery-backed RAM save)
+    this.core.destroy();
 
     // Save state on exit
     this.saveState();
@@ -666,7 +694,7 @@ export class Emulator {
 
     // Stop audio
     if (this.rtAudio) {
-      this.apu.onSamplesReady = null;
+      this.core.setAudioCallback(null);
       try {
         // Stop the stream first, then close it
         if (this.rtAudio.isStreamRunning()) {
@@ -718,8 +746,8 @@ export class Emulator {
   }
 
   // Get current frame buffer for external rendering
-  getFrameBuffer(): Uint8Array {
-    return this.ppu.frameBuffer;
+  getFrameBuffer(): Uint8Array | Uint16Array {
+    return this.core.getFramebuffer();
   }
 
   // Save state management
@@ -729,7 +757,8 @@ export class Emulator {
    * Get the path for the save state file
    */
   private getStatePath(): string {
-    return this.romPath.replace(/\.nes$/i, '.state');
+    // Remove common ROM extensions for all supported cores
+    return this.romPath.replace(/\.(nes|gba|agb)$/i, '.state');
   }
 
   /**
@@ -746,11 +775,7 @@ export class Emulator {
     return {
       version: Emulator.SAVE_STATE_VERSION,
       romPath: this.romPath,
-      cpu: this.cpu.getState(),
-      ppu: this.ppu.getState(),
-      apu: this.apu.getState(),
-      bus: this.bus.getState(),
-      cartridge: this.cartridge.getState(),
+      coreState: this.core.getState(),
       frameCount: this.frameCount,
     };
   }
@@ -759,11 +784,7 @@ export class Emulator {
    * Restore emulator state from a save state
    */
   setState(state: SaveState): void {
-    this.cpu.setState(state.cpu);
-    this.ppu.setState(state.ppu);
-    this.apu.setState(state.apu);
-    this.bus.setState(state.bus);
-    this.cartridge.setState(state.cartridge);
+    this.core.setState(state.coreState);
     this.frameCount = state.frameCount;
   }
 
