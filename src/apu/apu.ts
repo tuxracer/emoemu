@@ -1,6 +1,74 @@
 // APU (Audio Processing Unit) - Full Implementation
 // NES APU has 5 channels: 2 pulse, 1 triangle, 1 noise, 1 DMC
 
+// Channel state interfaces for full state preservation
+export interface PulseChannelState {
+  dutyCycle: number;
+  lengthHalt: boolean;
+  constantVolume: boolean;
+  volume: number;
+  sweepEnabled: boolean;
+  sweepPeriod: number;
+  sweepNegate: boolean;
+  sweepShift: number;
+  timerPeriod: number;
+  lengthCounter: number;
+  timerValue: number;
+  sequencePos: number;
+  envelopeStart: boolean;
+  envelopeVolume: number;
+  envelopeValue: number;
+  sweepReload: boolean;
+  sweepValue: number;
+  enabled: boolean;
+}
+
+export interface TriangleChannelState {
+  linearCounterLoad: number;
+  lengthHalt: boolean;
+  timerPeriod: number;
+  lengthCounter: number;
+  timerValue: number;
+  sequencePos: number;
+  linearCounter: number;
+  linearReload: boolean;
+  enabled: boolean;
+}
+
+export interface NoiseChannelState {
+  lengthHalt: boolean;
+  constantVolume: boolean;
+  volume: number;
+  mode: boolean;
+  timerPeriod: number;
+  lengthCounter: number;
+  timerValue: number;
+  shiftRegister: number;
+  envelopeStart: boolean;
+  envelopeVolume: number;
+  envelopeValue: number;
+  enabled: boolean;
+}
+
+export interface DMCChannelState {
+  irqEnabled: boolean;
+  loop: boolean;
+  ratePeriod: number;
+  sampleAddress: number;
+  sampleLength: number;
+  timerValue: number;
+  outputLevel: number;
+  currentAddress: number;
+  bytesRemaining: number;
+  sampleBuffer: number;
+  sampleBufferEmpty: boolean;
+  shiftRegister: number;
+  bitsRemaining: number;
+  silence: boolean;
+  enabled: boolean;
+  irqPending: boolean;
+}
+
 export interface APUState {
   frameCounterMode: number;
   frameIRQInhibit: boolean;
@@ -8,12 +76,18 @@ export interface APUState {
   cycleCount: number;
   frameCycleCount: number;
   frameStep: number;
-  // Channel enabled states (from $4015)
+  // Channel enabled states (from $4015) - kept for backwards compatibility
   pulse1Enabled: boolean;
   pulse2Enabled: boolean;
   triangleEnabled: boolean;
   noiseEnabled: boolean;
   dmcEnabled: boolean;
+  // Full channel states (optional for backwards compatibility with old saves)
+  pulse1?: PulseChannelState;
+  pulse2?: PulseChannelState;
+  triangle?: TriangleChannelState;
+  noise?: NoiseChannelState;
+  dmc?: DMCChannelState;
 }
 
 // Length counter lookup table
@@ -177,6 +251,50 @@ class PulseChannel {
   getLengthCounter(): number {
     return this.lengthCounter;
   }
+
+  getState(): PulseChannelState {
+    return {
+      dutyCycle: this.dutyCycle,
+      lengthHalt: this.lengthHalt,
+      constantVolume: this.constantVolume,
+      volume: this.volume,
+      sweepEnabled: this.sweepEnabled,
+      sweepPeriod: this.sweepPeriod,
+      sweepNegate: this.sweepNegate,
+      sweepShift: this.sweepShift,
+      timerPeriod: this.timerPeriod,
+      lengthCounter: this.lengthCounter,
+      timerValue: this.timerValue,
+      sequencePos: this.sequencePos,
+      envelopeStart: this.envelopeStart,
+      envelopeVolume: this.envelopeVolume,
+      envelopeValue: this.envelopeValue,
+      sweepReload: this.sweepReload,
+      sweepValue: this.sweepValue,
+      enabled: this.enabled,
+    };
+  }
+
+  setState(state: PulseChannelState): void {
+    this.dutyCycle = state.dutyCycle;
+    this.lengthHalt = state.lengthHalt;
+    this.constantVolume = state.constantVolume;
+    this.volume = state.volume;
+    this.sweepEnabled = state.sweepEnabled;
+    this.sweepPeriod = state.sweepPeriod;
+    this.sweepNegate = state.sweepNegate;
+    this.sweepShift = state.sweepShift;
+    this.timerPeriod = state.timerPeriod;
+    this.lengthCounter = state.lengthCounter;
+    this.timerValue = state.timerValue;
+    this.sequencePos = state.sequencePos;
+    this.envelopeStart = state.envelopeStart;
+    this.envelopeVolume = state.envelopeVolume;
+    this.envelopeValue = state.envelopeValue;
+    this.sweepReload = state.sweepReload;
+    this.sweepValue = state.sweepValue;
+    this.enabled = state.enabled;
+  }
 }
 
 // Triangle channel
@@ -191,6 +309,9 @@ class TriangleChannel {
   private linearCounter: number = 0;
   private linearReload: boolean = false;
   enabled: boolean = false;
+
+  // Pop suppression: smooth output when channel is silenced mid-waveform
+  private smoothedOutput: number = 0;
 
   writeControl(data: number): void {
     this.lengthHalt = (data & 0x80) !== 0;
@@ -238,14 +359,26 @@ class TriangleChannel {
   }
 
   output(): number {
+    let targetOutput: number;
+
     if (!this.enabled || this.lengthCounter === 0 || this.linearCounter === 0) {
-      return 0;
+      targetOutput = 0;
+    } else if (this.timerPeriod < 2) {
+      // Silence ultrasonic frequencies
+      targetOutput = 0;
+    } else {
+      targetOutput = TRIANGLE_TABLE[this.sequencePos];
     }
-    // Silence ultrasonic frequencies
-    if (this.timerPeriod < 2) {
-      return 0;
+
+    // Pop suppression: when silencing, ramp down smoothly instead of instant cutoff
+    if (targetOutput === 0 && this.smoothedOutput > 0) {
+      // Decay towards zero over ~1ms worth of samples
+      this.smoothedOutput = Math.max(0, this.smoothedOutput - 0.5);
+      return this.smoothedOutput;
     }
-    return TRIANGLE_TABLE[this.sequencePos];
+
+    this.smoothedOutput = targetOutput;
+    return targetOutput;
   }
 
   setEnabled(enabled: boolean): void {
@@ -257,6 +390,34 @@ class TriangleChannel {
 
   getLengthCounter(): number {
     return this.lengthCounter;
+  }
+
+  getState(): TriangleChannelState {
+    return {
+      linearCounterLoad: this.linearCounterLoad,
+      lengthHalt: this.lengthHalt,
+      timerPeriod: this.timerPeriod,
+      lengthCounter: this.lengthCounter,
+      timerValue: this.timerValue,
+      sequencePos: this.sequencePos,
+      linearCounter: this.linearCounter,
+      linearReload: this.linearReload,
+      enabled: this.enabled,
+    };
+  }
+
+  setState(state: TriangleChannelState): void {
+    this.linearCounterLoad = state.linearCounterLoad;
+    this.lengthHalt = state.lengthHalt;
+    this.timerPeriod = state.timerPeriod;
+    this.lengthCounter = state.lengthCounter;
+    this.timerValue = state.timerValue;
+    this.sequencePos = state.sequencePos;
+    this.linearCounter = state.linearCounter;
+    this.linearReload = state.linearReload;
+    this.enabled = state.enabled;
+    // Reset pop suppression state
+    this.smoothedOutput = 0;
   }
 }
 
@@ -344,6 +505,38 @@ class NoiseChannel {
 
   getLengthCounter(): number {
     return this.lengthCounter;
+  }
+
+  getState(): NoiseChannelState {
+    return {
+      lengthHalt: this.lengthHalt,
+      constantVolume: this.constantVolume,
+      volume: this.volume,
+      mode: this.mode,
+      timerPeriod: this.timerPeriod,
+      lengthCounter: this.lengthCounter,
+      timerValue: this.timerValue,
+      shiftRegister: this.shiftRegister,
+      envelopeStart: this.envelopeStart,
+      envelopeVolume: this.envelopeVolume,
+      envelopeValue: this.envelopeValue,
+      enabled: this.enabled,
+    };
+  }
+
+  setState(state: NoiseChannelState): void {
+    this.lengthHalt = state.lengthHalt;
+    this.constantVolume = state.constantVolume;
+    this.volume = state.volume;
+    this.mode = state.mode;
+    this.timerPeriod = state.timerPeriod;
+    this.lengthCounter = state.lengthCounter;
+    this.timerValue = state.timerValue;
+    this.shiftRegister = state.shiftRegister;
+    this.envelopeStart = state.envelopeStart;
+    this.envelopeVolume = state.envelopeVolume;
+    this.envelopeValue = state.envelopeValue;
+    this.enabled = state.enabled;
   }
 }
 
@@ -469,6 +662,46 @@ class DMCChannel {
   getBytesRemaining(): number {
     return this.bytesRemaining;
   }
+
+  getState(): DMCChannelState {
+    return {
+      irqEnabled: this.irqEnabled,
+      loop: this.loop,
+      ratePeriod: this.ratePeriod,
+      sampleAddress: this.sampleAddress,
+      sampleLength: this.sampleLength,
+      timerValue: this.timerValue,
+      outputLevel: this.outputLevel,
+      currentAddress: this.currentAddress,
+      bytesRemaining: this.bytesRemaining,
+      sampleBuffer: this.sampleBuffer,
+      sampleBufferEmpty: this.sampleBufferEmpty,
+      shiftRegister: this.shiftRegister,
+      bitsRemaining: this.bitsRemaining,
+      silence: this.silence,
+      enabled: this.enabled,
+      irqPending: this.irqPending,
+    };
+  }
+
+  setState(state: DMCChannelState): void {
+    this.irqEnabled = state.irqEnabled;
+    this.loop = state.loop;
+    this.ratePeriod = state.ratePeriod;
+    this.sampleAddress = state.sampleAddress;
+    this.sampleLength = state.sampleLength;
+    this.timerValue = state.timerValue;
+    this.outputLevel = state.outputLevel;
+    this.currentAddress = state.currentAddress;
+    this.bytesRemaining = state.bytesRemaining;
+    this.sampleBuffer = state.sampleBuffer;
+    this.sampleBufferEmpty = state.sampleBufferEmpty;
+    this.shiftRegister = state.shiftRegister;
+    this.bitsRemaining = state.bitsRemaining;
+    this.silence = state.silence;
+    this.enabled = state.enabled;
+    this.irqPending = state.irqPending;
+  }
 }
 
 // Precomputed pulse mixer lookup table (avoids division in hot path)
@@ -520,15 +753,36 @@ export class APU {
   private sampleBuffer: Float32Array;
   private sampleIndex: number = 0;
 
-  // Use fixed-point arithmetic for sample timing
-  private sampleCounter: number = 0;
-  private cyclesPerSample: number;
+  // Fractional sample timing using Bresenham-style accumulation
+  // This ensures perfect sample rate without drift (1789773 CPU cycles / 44100 samples = 40.584...)
+  // Instead of integer division, we accumulate and check: counter += sampleRate; if >= cpuFreq, emit sample
+  private sampleAccumulator: number = 0;
 
   // Audio callback
   onSamplesReady: ((samples: Float32Array) => void) | null = null;
 
+  // Audio filtering - simulates NES analog output characteristics
+  // First-order high-pass filter at ~37 Hz (removes DC offset)
+  private highPass1Prev: number = 0;
+  private highPass1Out: number = 0;
+  // First-order high-pass filter at ~300 Hz (from mixer capacitor, gentler for bass)
+  private highPass2Prev: number = 0;
+  private highPass2Out: number = 0;
+  // First-order low-pass filter at ~14 kHz (smooths harsh edges)
+  private lowPassPrev: number = 0;
+
+  // Filter coefficients (precomputed for 44100 Hz sample rate)
+  // High-pass: y[n] = α * (y[n-1] + x[n] - x[n-1]), where α = RC / (RC + dt)
+  // Low-pass: y[n] = α * x[n] + (1 - α) * y[n-1], where α = dt / (RC + dt)
+  private readonly highPass1Alpha = 0.996039; // ~37 Hz cutoff
+  private readonly highPass2Alpha = 0.958725; // ~300 Hz cutoff (gentler than 440 Hz)
+  private readonly lowPassAlpha = 0.815686;   // ~14 kHz cutoff
+
+  // Dithering - reduces quantization noise on quiet sounds
+  // Uses xorshift32 for fast pseudo-random number generation
+  private ditherState: number = 1;
+
   constructor() {
-    this.cyclesPerSample = Math.floor(this.cpuFrequency / this.sampleRate);
     // Small buffer for low latency - ring buffer in emulator handles buffering
     this.sampleBuffer = new Float32Array(256);
     this.reset();
@@ -550,8 +804,45 @@ export class APU {
     this.cycleCount = 0;
     this.frameCycleCount = 0;
     this.frameStep = 0;
-    this.sampleCounter = 0;
+    this.sampleAccumulator = 0;
     this.sampleIndex = 0;
+    // Reset filter state
+    this.highPass1Prev = 0;
+    this.highPass1Out = 0;
+    this.highPass2Prev = 0;
+    this.highPass2Out = 0;
+    this.lowPassPrev = 0;
+    this.ditherState = 1;
+  }
+
+  // Fast xorshift32 PRNG for dithering (returns value in [-1, 1])
+  private dither(): number {
+    let x = this.ditherState;
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    this.ditherState = x >>> 0; // Ensure unsigned
+    // Convert to float in range [-1, 1]
+    return (x / 0x7fffffff) - 1;
+  }
+
+  // Apply audio filters to simulate NES analog output
+  private applyFilters(sample: number): number {
+    // First high-pass filter (~37 Hz) - removes DC offset
+    this.highPass1Out = this.highPass1Alpha * (this.highPass1Out + sample - this.highPass1Prev);
+    this.highPass1Prev = sample;
+
+    // Second high-pass filter (~440 Hz) - simulates mixer capacitor coupling
+    this.highPass2Out = this.highPass2Alpha * (this.highPass2Out + this.highPass1Out - this.highPass2Prev);
+    this.highPass2Prev = this.highPass1Out;
+
+    // Low-pass filter (~14 kHz) - smooths harsh high frequencies
+    this.lowPassPrev = this.lowPassAlpha * this.highPass2Out + (1 - this.lowPassAlpha) * this.lowPassPrev;
+
+    // Add dithering to reduce quantization noise (very subtle, ~0.5 LSB equivalent)
+    const dithered = this.lowPassPrev + this.dither() * 0.00003;
+
+    return dithered;
   }
 
   cpuRead(address: number): number {
@@ -683,10 +974,11 @@ export class APU {
       this.stepFrameCounter();
     }
 
-    // Sample generation - use counter instead of modulo
-    this.sampleCounter++;
-    if (this.sampleCounter >= this.cyclesPerSample) {
-      this.sampleCounter = 0;
+    // Sample generation using Bresenham-style fractional accumulation
+    // This eliminates drift from integer division (40 vs 40.584 cycles per sample)
+    this.sampleAccumulator += this.sampleRate;
+    while (this.sampleAccumulator >= this.cpuFrequency) {
+      this.sampleAccumulator -= this.cpuFrequency;
 
       // Inline mixer for performance using lookup tables
       const p1 = this.pulse1.output();
@@ -700,7 +992,9 @@ export class APU {
       // TND mixer using precomputed lookup table
       const tndOut = TND_TABLE[(t << 11) | (n << 7) | d];
 
-      this.sampleBuffer[this.sampleIndex++] = pulseOut + tndOut;
+      // Apply audio filters (high-pass, low-pass) and dithering for authentic NES sound
+      const rawSample = pulseOut + tndOut;
+      this.sampleBuffer[this.sampleIndex++] = this.applyFilters(rawSample);
 
       if (this.sampleIndex >= this.sampleBuffer.length) {
         if (this.onSamplesReady) {
@@ -786,12 +1080,18 @@ export class APU {
       cycleCount: this.cycleCount,
       frameCycleCount: this.frameCycleCount,
       frameStep: this.frameStep,
-      // Save channel enabled states
+      // Save channel enabled states (for backwards compatibility)
       pulse1Enabled: this.pulse1.enabled,
       pulse2Enabled: this.pulse2.enabled,
       triangleEnabled: this.triangle.enabled,
       noiseEnabled: this.noise.enabled,
       dmcEnabled: this.dmc.enabled,
+      // Save full channel state for perfect audio continuity
+      pulse1: this.pulse1.getState(),
+      pulse2: this.pulse2.getState(),
+      triangle: this.triangle.getState(),
+      noise: this.noise.getState(),
+      dmc: this.dmc.getState(),
     };
   }
 
@@ -802,14 +1102,45 @@ export class APU {
     this.cycleCount = state.cycleCount;
     this.frameCycleCount = state.frameCycleCount;
     this.frameStep = state.frameStep;
-    // Restore channel enabled states (with fallback for old save states)
-    this.pulse1.setEnabled(state.pulse1Enabled ?? false);
-    this.pulse2.setEnabled(state.pulse2Enabled ?? false);
-    this.triangle.setEnabled(state.triangleEnabled ?? false);
-    this.noise.setEnabled(state.noiseEnabled ?? false);
-    this.dmc.setEnabled(state.dmcEnabled ?? false);
-    // Reset sample counters
-    this.sampleCounter = 0;
+
+    // Restore full channel state if available, otherwise fall back to enabled states only
+    if (state.pulse1) {
+      this.pulse1.setState(state.pulse1);
+    } else {
+      this.pulse1.setEnabled(state.pulse1Enabled ?? false);
+    }
+
+    if (state.pulse2) {
+      this.pulse2.setState(state.pulse2);
+    } else {
+      this.pulse2.setEnabled(state.pulse2Enabled ?? false);
+    }
+
+    if (state.triangle) {
+      this.triangle.setState(state.triangle);
+    } else {
+      this.triangle.setEnabled(state.triangleEnabled ?? false);
+    }
+
+    if (state.noise) {
+      this.noise.setState(state.noise);
+    } else {
+      this.noise.setEnabled(state.noiseEnabled ?? false);
+    }
+
+    if (state.dmc) {
+      this.dmc.setState(state.dmc);
+    } else {
+      this.dmc.setEnabled(state.dmcEnabled ?? false);
+    }
+
+    // Reset sample accumulator and filter state
+    this.sampleAccumulator = 0;
     this.sampleIndex = 0;
+    this.highPass1Prev = 0;
+    this.highPass1Out = 0;
+    this.highPass2Prev = 0;
+    this.highPass2Out = 0;
+    this.lowPassPrev = 0;
   }
 }

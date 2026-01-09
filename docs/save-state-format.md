@@ -123,7 +123,12 @@ The loader also supports uncompressed JSON for backwards compatibility, detected
   "pulse2Enabled": true,
   "triangleEnabled": true,
   "noiseEnabled": false,
-  "dmcEnabled": false
+  "dmcEnabled": false,
+  "pulse1": { ... },
+  "pulse2": { ... },
+  "triangle": { ... },
+  "noise": { ... },
+  "dmc": { ... }
 }
 ```
 
@@ -135,13 +140,101 @@ The loader also supports uncompressed JSON for backwards compatibility, detected
 | `cycleCount` | number | Total APU cycles |
 | `frameCycleCount` | number | Cycles within current frame |
 | `frameStep` | number | Current frame sequencer step |
-| `pulse1Enabled` | boolean | Pulse 1 channel enabled |
-| `pulse2Enabled` | boolean | Pulse 2 channel enabled |
-| `triangleEnabled` | boolean | Triangle channel enabled |
-| `noiseEnabled` | boolean | Noise channel enabled |
-| `dmcEnabled` | boolean | DMC channel enabled |
+| `pulse1Enabled` | boolean | Pulse 1 channel enabled (for backwards compatibility) |
+| `pulse2Enabled` | boolean | Pulse 2 channel enabled (for backwards compatibility) |
+| `triangleEnabled` | boolean | Triangle channel enabled (for backwards compatibility) |
+| `noiseEnabled` | boolean | Noise channel enabled (for backwards compatibility) |
+| `dmcEnabled` | boolean | DMC channel enabled (for backwards compatibility) |
+| `pulse1` | object | Full Pulse 1 channel state (optional) |
+| `pulse2` | object | Full Pulse 2 channel state (optional) |
+| `triangle` | object | Full Triangle channel state (optional) |
+| `noise` | object | Full Noise channel state (optional) |
+| `dmc` | object | Full DMC channel state (optional) |
 
-Note: Only channel enabled states are saved. Full channel register state is not preserved; channels regenerate audio from the game's register writes after restore.
+### Pulse Channel State
+
+```json
+{
+  "dutyCycle": 0,
+  "lengthHalt": false,
+  "constantVolume": false,
+  "volume": 0,
+  "sweepEnabled": false,
+  "sweepPeriod": 0,
+  "sweepNegate": false,
+  "sweepShift": 0,
+  "timerPeriod": 0,
+  "lengthCounter": 0,
+  "timerValue": 0,
+  "sequencePos": 0,
+  "envelopeStart": false,
+  "envelopeVolume": 0,
+  "envelopeValue": 0,
+  "sweepReload": false,
+  "sweepValue": 0,
+  "enabled": true
+}
+```
+
+### Triangle Channel State
+
+```json
+{
+  "linearCounterLoad": 0,
+  "lengthHalt": false,
+  "timerPeriod": 0,
+  "lengthCounter": 0,
+  "timerValue": 0,
+  "sequencePos": 0,
+  "linearCounter": 0,
+  "linearReload": false,
+  "enabled": true
+}
+```
+
+### Noise Channel State
+
+```json
+{
+  "lengthHalt": false,
+  "constantVolume": false,
+  "volume": 0,
+  "mode": false,
+  "timerPeriod": 0,
+  "lengthCounter": 0,
+  "timerValue": 0,
+  "shiftRegister": 1,
+  "envelopeStart": false,
+  "envelopeVolume": 0,
+  "envelopeValue": 0,
+  "enabled": false
+}
+```
+
+### DMC Channel State
+
+```json
+{
+  "irqEnabled": false,
+  "loop": false,
+  "ratePeriod": 0,
+  "sampleAddress": 49152,
+  "sampleLength": 1,
+  "timerValue": 0,
+  "outputLevel": 0,
+  "currentAddress": 49152,
+  "bytesRemaining": 0,
+  "sampleBuffer": 0,
+  "sampleBufferEmpty": true,
+  "shiftRegister": 0,
+  "bitsRemaining": 0,
+  "silence": true,
+  "enabled": false,
+  "irqPending": false
+}
+```
+
+Note: Full channel state ensures perfect audio continuity when loading save states. The `*Enabled` fields at the top level are kept for backwards compatibility with older save files that don't include full channel state.
 
 ## Bus State
 
@@ -219,6 +312,7 @@ No internal state.
 | Version | Changes |
 |---------|---------|
 | 1 | Initial format |
+| 1.1 | Added full APU channel state (backwards compatible) |
 
 ## Validation
 

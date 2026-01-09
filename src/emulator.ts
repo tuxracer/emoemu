@@ -120,7 +120,7 @@ export class Emulator {
   private renderer: Renderer;
   private renderMode: RenderMode;
   private apu: APU;
-  private rtAudio: RtAudio | null = null;
+  private rtAudio: InstanceType<typeof RtAudio> | null = null;
   private audioEnabled: boolean = true;
   private autoResize: boolean = false; // Whether to handle terminal resize events
   private showStatusBar: boolean = true;
@@ -134,11 +134,6 @@ export class Emulator {
   private inputHandler: ((key: string) => void) | null = null;
   private autoSaveInterval: ReturnType<typeof setInterval> | null = null;
   private static readonly AUTO_SAVE_INTERVAL_MS = 30000; // 30 seconds (only saves if SRAM was modified)
-  // Pre-allocated audio buffer pool to avoid allocation per sample batch
-  // Using 3 buffers to handle async audio writes safely
-  private audioBufferPool: Buffer[] = [];
-  private audioBufferIndex: number = 0;
-  private static readonly AUDIO_BUFFER_COUNT = 3;
 
   constructor(options: EmulatorOptions) {
     // Store ROM path for save states
@@ -408,7 +403,7 @@ export class Emulator {
     // Flow control using frameOutputCallback
     let framesWritten = 0;
     let framesPlayed = 0;
-    const maxQueuedFrames = 3; // Maximum frames to buffer ahead (reduced for lower latency)
+    const maxQueuedFrames = 4; // Maximum frames to buffer ahead
 
     // Forward declaration for writeFrame (used in callback)
     let tryWriteFrames: () => void;
@@ -480,7 +475,7 @@ export class Emulator {
         'TUI-NES',
         null, // No input callback
         onFramePlayed, // Frame output callback for flow control
-        0, // Default flags (no special options)
+        0 as unknown as undefined, // Default flags - runtime expects number, types expect undefined
         onAudioError // Error callback for graceful recovery
       );
 
