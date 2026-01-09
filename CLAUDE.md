@@ -346,6 +346,10 @@ Input:
 Audio:
   --no-audio        Disable audio output
 
+Save Data:
+  --no-save-state   Disable save state loading/saving
+  --no-battery-save Disable battery save (.srm) loading/saving
+
 Display:
   --no-status       Hide the status bar
 ```
