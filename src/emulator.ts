@@ -4,7 +4,7 @@ import { CPU, CPUState } from './cpu/cpu.js';
 import { PPU, PPUState } from './ppu/ppu.js';
 import { Bus, BusState } from './memory/bus.js';
 import { Cartridge, CartridgeState } from './cartridge/cartridge.js';
-import { Controller } from './input/controller.js';
+import { Controller, Button } from './input/controller.js';
 import { InputManager } from './input/input-manager.js';
 import { GamepadManager } from './input/gamepad-manager.js';
 import { TerminalRenderer } from './ppu/renderer.js';
@@ -784,10 +784,75 @@ export class Emulator {
   }
 
   /**
-   * Load state from a .state file (gzipped or plain JSON)
-   * @returns true if state was loaded successfully
+   * Prompt user for confirmation with keyboard (y/N) and gamepad (A=yes, B=no) support
+   * @returns Promise that resolves to true if user confirms, false otherwise
    */
-  loadState(): boolean {
+  private promptConfirmation(message: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      process.stdout.write(`${message} (y/N, or A/B on gamepad): `);
+
+      // Set up keyboard input
+      const wasRaw = process.stdin.isRaw;
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+
+      let resolved = false;
+      const cleanup = () => {
+        if (resolved) return;
+        resolved = true;
+        process.stdin.setRawMode(wasRaw ?? false);
+        process.stdin.pause();
+        process.stdin.removeListener('data', onKeyPress);
+        if (this.gamepadManager) {
+          this.gamepadManager.stop();
+        }
+        console.log(); // New line after prompt
+      };
+
+      const onKeyPress = (data: Buffer) => {
+        const key = data.toString().toLowerCase();
+        if (key === 'y') {
+          cleanup();
+          resolve(true);
+        } else if (key === 'n' || key === '\r' || key === '\n' || key === '\x1b') {
+          // n, Enter, or Escape = No
+          cleanup();
+          resolve(false);
+        }
+      };
+
+      process.stdin.on('data', onKeyPress);
+
+      // Set up gamepad input if available
+      if (this.gamepadManager) {
+        // Temporarily hijack controller to detect A/B presses
+        const checkGamepad = setInterval(() => {
+          if (resolved) {
+            clearInterval(checkGamepad);
+            return;
+          }
+          // Check if A is pressed (confirm)
+          if (this.controller1.getButton(Button.A)) {
+            clearInterval(checkGamepad);
+            cleanup();
+            resolve(true);
+          }
+          // Check if B is pressed (cancel)
+          if (this.controller1.getButton(Button.B)) {
+            clearInterval(checkGamepad);
+            cleanup();
+            resolve(false);
+          }
+        }, 50);
+      }
+    });
+  }
+
+  /**
+   * Load state from a .state file (gzipped or plain JSON)
+   * @returns Promise<true> if state was loaded successfully
+   */
+  async loadState(): Promise<boolean> {
     const statePath = this.getStatePath();
     if (!existsSync(statePath)) {
       return false;
@@ -800,9 +865,14 @@ export class Emulator {
       const json = isGzipped ? gunzipSync(data).toString('utf-8') : data.toString('utf-8');
       const state = JSON.parse(json) as SaveState;
 
-      // Validate version - reject incompatible save states
+      // Validate version - prompt user for incompatible save states
       if (state.version !== Emulator.SAVE_STATE_VERSION) {
-        console.warn(`Incompatible save state version: expected ${Emulator.SAVE_STATE_VERSION}, got ${state.version}. Starting fresh.`);
+        console.log(`Incompatible save state (version ${state.version}, need ${Emulator.SAVE_STATE_VERSION}).`);
+        const startFresh = await this.promptConfirmation('Delete old save and start fresh?');
+        if (startFresh) {
+          this.deleteSavedState();
+          console.log('Old save state deleted.');
+        }
         return false;
       }
 

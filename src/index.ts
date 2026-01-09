@@ -458,13 +458,11 @@ async function main(): Promise<void> {
 
     let stateLoaded = false;
     if (shouldRestore) {
-      stateLoaded = emulator.loadState();
+      stateLoaded = await emulator.loadState();
       if (stateLoaded) {
         console.log('Resuming from saved state...');
-      } else {
-        console.log('Failed to load saved state, starting fresh...');
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
     await emulator.run(stateLoaded);
