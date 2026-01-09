@@ -180,6 +180,7 @@ Options:
   --list-gamepads   List detected gamepad/controller devices and exit
   --no-gamepad      Disable gamepad support
   --no-audio        Disable audio output
+  --no-save-state   Disable save state loading and saving
   --no-status       Hide the status bar
   --debug-gamepad   Show raw gamepad HID data (for debugging)
   --help            Show this help message
@@ -215,6 +216,7 @@ function parseArgs(args: string[]): {
   core: string | undefined;
   enableGamepad: boolean;
   enableAudio: boolean;
+  enableSaveState: boolean;
   showStatusBar: boolean;
   debugGamepad: boolean;
 } {
@@ -231,6 +233,7 @@ function parseArgs(args: string[]): {
     core: undefined as string | undefined,
     enableGamepad: true,
     enableAudio: true,
+    enableSaveState: true,
     showStatusBar: true,
     debugGamepad: false,
   };
@@ -266,6 +269,8 @@ function parseArgs(args: string[]): {
       result.enableGamepad = false;
     } else if (arg === "--no-audio") {
       result.enableAudio = false;
+    } else if (arg === "--no-save-state") {
+      result.enableSaveState = false;
     } else if (arg === "--no-status") {
       result.showStatusBar = false;
     } else if (arg === "--debug-gamepad") {
@@ -556,33 +561,30 @@ async function main(): Promise<void> {
   console.log("");
   console.log("Press Escape or Ctrl+C to quit");
 
-  // Check for saved state
-  const statePath = getStatePath(options.romPath);
-  const stateFileExists = existsSync(statePath);
-  const validState = stateFileExists ? validateStateFile(statePath) : null;
+  // Check for saved state (unless disabled)
   let shouldRestore = false;
 
-  if (stateFileExists && !validState) {
-    console.log("");
-    console.warn(
-      "Warning: A saved state file was found but appears to be corrupted or invalid."
-    );
-    const continueAnyway = await askYesNo("Continue without saved state?", true);
-    if (!continueAnyway) {
-      console.log("Exiting.");
-      process.exit(0);
-    }
-    console.log("");
-  } else if (validState) {
-    console.log("");
-    console.log("Resuming from saved state...");
-    shouldRestore = true;
-  }
+  if (options.enableSaveState) {
+    const statePath = getStatePath(options.romPath);
+    const stateFileExists = existsSync(statePath);
+    const validState = stateFileExists ? validateStateFile(statePath) : null;
 
-  if (!shouldRestore) {
-    console.log("");
-    console.log("Starting in 2 seconds...");
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (stateFileExists && !validState) {
+      console.log("");
+      console.warn(
+        "Warning: A saved state file was found but appears to be corrupted or invalid."
+      );
+      const continueAnyway = await askYesNo("Continue without saved state?", true);
+      if (!continueAnyway) {
+        console.log("Exiting.");
+        process.exit(0);
+      }
+      console.log("");
+    } else if (validState) {
+      console.log("");
+      console.log("Resuming from saved state...");
+      shouldRestore = true;
+    }
   }
 
   try {
@@ -600,6 +602,7 @@ async function main(): Promise<void> {
       scale: options.scale,
       enableGamepad: options.enableGamepad,
       enableAudio: options.enableAudio,
+      enableSaveState: options.enableSaveState,
       showStatusBar: options.showStatusBar,
     });
 

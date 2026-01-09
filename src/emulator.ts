@@ -41,6 +41,7 @@ export interface EmulatorOptions {
   scale?: number;  // For Kitty renderer
   enableGamepad?: boolean;  // Enable gamepad/controller support
   enableAudio?: boolean;  // Enable audio output (default: true)
+  enableSaveState?: boolean;  // Enable save state loading/saving (default: true)
   showStatusBar?: boolean;  // Show status bar (default: true)
 }
 
@@ -123,6 +124,7 @@ export class Emulator {
   private renderMode: RenderMode;
   private rtAudio: InstanceType<typeof RtAudio> | null = null;
   private audioEnabled: boolean = true;
+  private saveStateEnabled: boolean = true;
   private autoResize: boolean = false; // Whether to handle terminal resize events
   private showStatusBar: boolean = true;
   private romPath: string;
@@ -155,6 +157,7 @@ export class Emulator {
     this.controller1 = new Controller();
     this.controller2 = new Controller();
     this.audioEnabled = options.enableAudio !== false;
+    this.saveStateEnabled = options.enableSaveState !== false;
     this.showStatusBar = options.showStatusBar !== false;
 
     // Initialize input manager with controllers
@@ -710,7 +713,9 @@ export class Emulator {
     this.saveBatterySave();
 
     // Save state on exit (must happen before destroy)
-    this.saveState();
+    if (this.saveStateEnabled) {
+      this.saveState();
+    }
 
     // Destroy core
     this.core.destroy();
