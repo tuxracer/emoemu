@@ -403,11 +403,17 @@ export class Emulator {
     // Flow control using frameOutputCallback
     let framesWritten = 0;
     let framesPlayed = 0;
-    const maxQueuedFrames = 4; // Maximum frames to buffer ahead
+    const maxQueuedFrames = 3; // Maximum frames to buffer ahead (reduced for lower latency)
+
+    // Forward declaration for writeFrame (used in callback)
+    let tryWriteFrames: () => void;
 
     // Frame output callback - called when a frame finishes playing
+    // Leverages RtAudio's queue by reactively writing when space becomes available
     const onFramePlayed = () => {
       framesPlayed++;
+      // Opportunistically write more frames when playback creates room
+      tryWriteFrames();
     };
 
     // Function to create/recreate RtAudio
@@ -447,8 +453,8 @@ export class Emulator {
 
     createAudio();
 
-    // Helper to write a complete frame to RtAudio
-    const writeFrame = () => {
+    // Helper to write a single frame to RtAudio
+    const writeFrame = (): boolean => {
       if (!this.rtAudio || sampleBufferPos < frameSize) return false;
 
       // Flow control: don't queue too many frames ahead
@@ -479,6 +485,13 @@ export class Emulator {
       return true;
     };
 
+    // Try to write all available frames to RtAudio's queue
+    tryWriteFrames = () => {
+      while (sampleBufferPos >= frameSize && writeFrame()) {
+        // Keep writing until buffer is drained or queue is full
+      }
+    };
+
     // Connect APU sample output to RtAudio
     this.apu.onSamplesReady = (samples: Float32Array) => {
       if (!this.rtAudio || !this.audioEnabled) return;
@@ -494,10 +507,8 @@ export class Emulator {
       sampleBuffer.set(samples, sampleBufferPos);
       sampleBufferPos += samples.length;
 
-      // Write complete frames (flow controlled by callback)
-      while (sampleBufferPos >= frameSize && writeFrame()) {
-        // Keep writing until we can't anymore
-      }
+      // Write complete frames to RtAudio's queue
+      tryWriteFrames();
     };
   }
 
