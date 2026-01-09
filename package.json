@@ -25,11 +25,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "audify": "^1.10.1",
     "chalk": "^5.3.0",
     "ink": "^5.0.1",
     "node-hid": "^3.1.0",
-    "react": "^18.3.1",
-    "speaker": "^0.5.5"
+    "react": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

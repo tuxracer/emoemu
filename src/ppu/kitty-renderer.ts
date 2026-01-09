@@ -75,8 +75,6 @@ export class KittyRenderer {
   private scaledRowBuffer!: Uint8Array;
   // Previous frame buffer for row-level memoization (skip unchanged rows)
   private prevFrameBuffer: Uint8Array = new Uint8Array(NES_WIDTH * NES_HEIGHT);
-  // Pre-allocated buffer for PNG filter bytes (one 0x00 per row)
-  private pngFilterBuffer!: Buffer;
   // Cached PNG data from last encode
   private pngBuffer: Buffer = Buffer.alloc(0);
 
@@ -107,8 +105,6 @@ export class KittyRenderer {
     // Allocate buffers for integer scaling
     this.scaledRgbBuffer = new Uint8Array(this.scaledWidth * this.scaledHeight * 3);
     this.scaledRowBuffer = new Uint8Array(this.scaledWidth * 3);
-    // PNG filter buffer - one 0x00 byte per row (filter type "none")
-    this.pngFilterBuffer = Buffer.alloc(this.scaledHeight);
   }
 
   // Calculate centering offsets for fixed scale mode
@@ -194,7 +190,6 @@ export class KittyRenderer {
         // Reallocate buffers for new size
         this.scaledRgbBuffer = new Uint8Array(this.scaledWidth * this.scaledHeight * 3);
         this.scaledRowBuffer = new Uint8Array(this.scaledWidth * 3);
-        this.pngFilterBuffer = Buffer.alloc(this.scaledHeight);
       }
     } else {
       this.calculateFixedScaleOffsets();

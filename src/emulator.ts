@@ -10,7 +10,8 @@ import { GamepadManager } from './input/gamepad-manager.js';
 import { TerminalRenderer } from './ppu/renderer.js';
 import { KittyRenderer } from './ppu/kitty-renderer.js';
 import { APU, APUState } from './apu/apu.js';
-import Speaker from 'speaker';
+import pkg from 'audify';
+const { RtAudio, RtAudioFormat } = pkg;
 
 export interface SaveState {
   version: number;
@@ -119,7 +120,7 @@ export class Emulator {
   private renderer: Renderer;
   private renderMode: RenderMode;
   private apu: APU;
-  private speaker: Speaker | null = null;
+  private rtAudio: RtAudio | null = null;
   private audioEnabled: boolean = true;
   private autoResize: boolean = false; // Whether to handle terminal resize events
   private showStatusBar: boolean = true;
@@ -133,7 +134,7 @@ export class Emulator {
   private autoSaveInterval: ReturnType<typeof setInterval> | null = null;
   private static readonly AUTO_SAVE_INTERVAL_MS = 30000; // 30 seconds (only saves if SRAM was modified)
   // Pre-allocated audio buffer pool to avoid allocation per sample batch
-  // Using 3 buffers to handle async speaker writes safely
+  // Using 3 buffers to handle async audio writes safely
   private audioBufferPool: Buffer[] = [];
   private audioBufferIndex: number = 0;
   private static readonly AUDIO_BUFFER_COUNT = 3;
@@ -387,27 +388,52 @@ export class Emulator {
 
   private setupAudio(): void {
     const sampleRate = this.apu.getSampleRate();
+    // Frame size for audio buffer (~20ms at sample rate)
+    const frameSize = Math.floor(sampleRate * 0.02);
+    // Buffer size in bytes (16-bit stereo = 4 bytes per sample frame)
+    const frameBytes = frameSize * 2 * 2; // frameSize * 2 channels * 2 bytes
 
-    // Function to create/recreate speaker
-    const createSpeaker = () => {
-      if (this.speaker) {
+    // Sample accumulator buffer (float samples waiting to be written)
+    let sampleBuffer = new Float32Array(frameSize * 2); // Double size for safety
+    let sampleBufferPos = 0;
+
+    // Pre-allocated output buffer for RtAudio (exact frame size required)
+    const outputBuffer = Buffer.alloc(frameBytes);
+
+    // Function to create/recreate RtAudio
+    const createAudio = () => {
+      if (this.rtAudio) {
         try {
-          this.speaker.end();
+          this.rtAudio.closeStream();
         } catch {
           // Ignore cleanup errors
         }
       }
-      this.speaker = new Speaker({
-        channels: 1,
-        bitDepth: 16,
-        sampleRate: sampleRate,
-      });
-      this.speaker.on('error', () => {
-        // Don't disable audio on error, just recreate speaker next time
-      });
+
+      this.rtAudio = new RtAudio();
+
+      // Open output-only stream (stereo for proper speaker output)
+      this.rtAudio.openStream(
+        {
+          deviceId: this.rtAudio.getDefaultOutputDevice(),
+          nChannels: 2, // Stereo output
+          firstChannel: 0,
+        },
+        null, // No input
+        RtAudioFormat.RTAUDIO_SINT16,
+        sampleRate,
+        frameSize,
+        'TUI-NES',
+        null, // No input callback
+        null  // No frame output callback
+      );
+
+      this.rtAudio.start();
+      // Reset buffer on audio recreation
+      sampleBufferPos = 0;
     };
 
-    createSpeaker();
+    createAudio();
 
     // Track audio timing for sync
     let audioStartTime = performance.now();
@@ -421,9 +447,34 @@ export class Emulator {
     const maxResyncsBeforeReset = 5;
     const resyncWindowMs = 2000; // Reset counter if no resync in 2 seconds
 
-    // Connect APU sample output directly to speaker
+    // Helper to write a complete frame to RtAudio
+    const writeFrame = () => {
+      if (!this.rtAudio || sampleBufferPos < frameSize) return;
+
+      // Convert float samples to int16 stereo in output buffer
+      // Duplicate mono sample to both left and right channels
+      for (let i = 0; i < frameSize; i++) {
+        const sample = Math.max(-1, Math.min(1, sampleBuffer[i]));
+        const int16 = (sample * 32767) | 0;
+        const offset = i * 4; // 4 bytes per stereo sample (2 channels * 2 bytes)
+        outputBuffer.writeInt16LE(int16, offset);     // Left channel
+        outputBuffer.writeInt16LE(int16, offset + 2); // Right channel
+      }
+
+      this.rtAudio.write(outputBuffer);
+      samplesWritten += frameSize;
+
+      // Shift remaining samples to front of buffer
+      const remaining = sampleBufferPos - frameSize;
+      if (remaining > 0) {
+        sampleBuffer.copyWithin(0, frameSize, sampleBufferPos);
+      }
+      sampleBufferPos = remaining;
+    };
+
+    // Connect APU sample output to RtAudio
     this.apu.onSamplesReady = (samples: Float32Array) => {
-      if (!this.speaker || !this.audioEnabled) return;
+      if (!this.rtAudio || !this.audioEnabled) return;
 
       const now = performance.now();
       const elapsedMs = now - audioStartTime;
@@ -446,15 +497,16 @@ export class Emulator {
         }
         lastResyncTime = now;
 
-        // If too many resyncs, recreate speaker to reset all state
+        // If too many resyncs, recreate audio to reset all state
         if (resyncCount >= maxResyncsBeforeReset) {
-          createSpeaker();
+          createAudio();
           resyncCount = 0;
         }
 
         audioStartTime = now;
         samplesWritten = 0;
-        return; // Skip this batch after resync
+        sampleBufferPos = 0; // Clear sample buffer on resync
+        return;
       }
 
       // Reset resync counter if audio is healthy
@@ -462,24 +514,21 @@ export class Emulator {
         resyncCount = 0;
       }
 
-      // Use pre-allocated buffer pool
-      const requiredSize = samples.length * 2;
-      let buffer = this.audioBufferPool[this.audioBufferIndex];
-
-      if (!buffer || buffer.length < requiredSize) {
-        buffer = Buffer.alloc(requiredSize);
-        this.audioBufferPool[this.audioBufferIndex] = buffer;
+      // Add incoming samples to buffer
+      // Expand buffer if needed
+      if (sampleBufferPos + samples.length > sampleBuffer.length) {
+        const newBuffer = new Float32Array(sampleBuffer.length * 2);
+        newBuffer.set(sampleBuffer);
+        sampleBuffer = newBuffer;
       }
 
-      for (let i = 0; i < samples.length; i++) {
-        const sample = Math.max(-1, Math.min(1, samples[i]));
-        const int16 = (sample * 32767) | 0;
-        buffer.writeInt16LE(int16, i * 2);
-      }
+      sampleBuffer.set(samples, sampleBufferPos);
+      sampleBufferPos += samples.length;
 
-      this.speaker.write(buffer);
-      samplesWritten += samples.length;
-      this.audioBufferIndex = (this.audioBufferIndex + 1) % Emulator.AUDIO_BUFFER_COUNT;
+      // Write complete frames
+      while (sampleBufferPos >= frameSize) {
+        writeFrame();
+      }
     };
   }
 
@@ -601,10 +650,14 @@ export class Emulator {
     }
 
     // Stop audio
-    if (this.speaker) {
+    if (this.rtAudio) {
       this.apu.onSamplesReady = null;
-      this.speaker.end();
-      this.speaker = null;
+      try {
+        this.rtAudio.closeStream();
+      } catch {
+        // Ignore cleanup errors
+      }
+      this.rtAudio = null;
     }
 
     // Stop global keyboard listener
