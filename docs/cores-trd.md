@@ -1,13 +1,13 @@
 # Multi-Core Architecture - Technical Requirements Document
 
-This document describes the architecture for restructuring TUI-NES into a multi-core emulator that can support multiple gaming systems (NES, GBA, and future systems) with shared infrastructure.
+This document describes the multi-core architecture of TUI-NES, which supports multiple gaming systems (NES, GBC, and future systems) with shared infrastructure.
 
 ## Overview
 
 ### Goals
 
 1. **Modularity**: Separate system-specific emulation (cores) from shared infrastructure (frontend)
-2. **Extensibility**: Enable adding new systems (GBA, SNES, GB) without modifying shared code
+2. **Extensibility**: Enable adding new systems (SNES, GBA) without modifying shared code
 3. **Code Reuse**: Share input handling, rendering, audio output, and state management across cores
 4. **Consistency**: Provide a unified user experience regardless of which system is being emulated
 
@@ -29,7 +29,7 @@ Describes a core's capabilities and requirements. Called before loading a ROM.
 
 ```typescript
 interface SystemInfo {
-  /** Unique identifier (e.g., "nes", "gba") */
+  /** Unique identifier (e.g., "nes", "gbc") */
   id: string;
 
   /** Human-readable name (e.g., "Nintendo Entertainment System") */
@@ -198,7 +198,7 @@ interface Core {
 | System | CPU Clock | PPU Ratio | Frame Rate |
 |--------|-----------|-----------|------------|
 | NES    | 1.79 MHz  | 3:1       | 60.0988 fps |
-| GBA    | 16.78 MHz | PPU-driven | 59.7275 fps |
+| GBC    | 4.19 MHz  | 1:1       | 59.7275 fps |
 | SNES   | 3.58 MHz  | Variable  | 60.0988 fps |
 
 **Decision**: `runFrame()` abstracts internal timing. Each core manages its own CPU/PPU synchronization. The frontend uses `SystemInfo.fps` for frame pacing.
@@ -207,7 +207,7 @@ interface Core {
 
 Different systems have different button counts:
 - **NES**: 8 buttons (A, B, Select, Start, D-pad)
-- **GBA**: 10 buttons (A, B, L, R, Select, Start, D-pad)
+- **GBC**: 8 buttons (A, B, Select, Start, D-pad)
 - **SNES**: 12 buttons (A, B, X, Y, L, R, Select, Start, D-pad)
 
 **Decision**: Frontend defines `StandardButton` enum for physical inputs. `InputMapper` translates to core-specific button IDs via name matching.
@@ -226,7 +226,7 @@ enum StandardButton {
 | System | Color Format | Palette Size |
 |--------|--------------|--------------|
 | NES    | 6-bit palette indices | 64 colors |
-| GBA    | 15-bit RGB (xBBBBBGGGGGRRRRR) | Direct |
+| GBC    | 15-bit RGB (xBBBBBGGGGGRRRRR) | Direct |
 | SNES   | 15-bit RGB or palette | Variable |
 
 **Decision**: `SystemInfo.colorSpace` specifies format. Renderers convert to RGB24 for display.
@@ -249,7 +249,7 @@ function framebufferToRgb24(fb: Uint8Array | Uint16Array, info: SystemInfo): Uin
 | System | Sample Rate | Channels |
 |--------|-------------|----------|
 | NES    | 44100 Hz    | Mono     |
-| GBA    | 32768 Hz    | Stereo   |
+| GBC    | 44100 Hz    | Stereo   |
 
 **Decision**: Callback-based audio with configurable sample rate. Frontend's RtAudio wrapper handles the output device.
 
@@ -257,7 +257,7 @@ function framebufferToRgb24(fb: Uint8Array | Uint16Array, info: SystemInfo): Uin
 
 **Decision**: `CoreState` includes metadata for validation:
 - `version`: Detect incompatible state formats
-- `coreId`: Prevent loading NES state into GBA core
+- `coreId`: Prevent loading NES state into GBC core
 - `gameId`: Warn if state doesn't match current ROM
 
 ---
@@ -305,14 +305,14 @@ src/
 │   │   └── mappers/
 │   │       └── mapper.ts       # All mappers [from src/cartridge/mappers/]
 │   │
-│   └── gba/                    # Future: Game Boy Advance
-│       ├── index.ts            # GBACore class
-│       ├── arm7tdmi.ts         # ARM7TDMI CPU
-│       ├── thumb.ts            # Thumb instruction set
-│       ├── ppu.ts              # GBA PPU (240×160)
-│       ├── apu.ts              # GBA sound
-│       ├── bus.ts              # GBA memory map
-│       └── cartridge.ts        # GBA ROM handling
+│   └── gbc/                    # Game Boy Color
+│       ├── index.ts            # GBCCore class
+│       ├── cpu.ts              # Sharp LR35902 CPU (Z80-like)
+│       ├── ppu.ts              # GBC PPU (160×144)
+│       ├── apu.ts              # GBC sound (4 channels, stereo)
+│       ├── bus.ts              # GBC memory map
+│       ├── timer.ts            # Timer/divider registers
+│       └── cartridge.ts        # GBC ROM handling, MBC mappers
 │
 └── types/
     └── *.d.ts                  # Type declarations
@@ -352,11 +352,10 @@ const cores = new Map<string, CoreFactory>([
     create: () => new NESCore(),
     extensions: ['.nes', '.unf'],
   }],
-  // Future:
-  // ['gba', {
-  //   create: () => new GBACore(),
-  //   extensions: ['.gba', '.agb'],
-  // }],
+  ['gbc', {
+    create: () => new GBCCore(),
+    extensions: ['.gbc', '.gb'],
+  }],
 ]);
 
 /** Auto-detect core from file extension */
@@ -635,104 +634,53 @@ class InputMapper {
 
 ---
 
-## Migration Plan
+## GBC Core Implementation
 
-### Phase 1: Create Core Infrastructure (Non-Breaking)
-
-1. Create `src/core/core.ts` with interface definitions
-2. Create `src/core/button.ts` with StandardButton enum
-3. Create `src/frontend/core-registry.ts`
-4. Create `src/input/input-mapper.ts`
-
-**Verification**: TypeScript compiles, no runtime changes.
-
-### Phase 2: Refactor NES into NESCore
-
-1. Create `src/cores/nes/` directory
-2. Copy existing components (cpu, ppu, apu, bus, cartridge)
-3. Create `NESCore` class implementing Core interface
-4. Modify Bus to use button callback instead of Controller objects
-5. Add re-exports for backward compatibility
-
-**Verification**: Existing imports still work, NESCore passes unit tests.
-
-### Phase 3: Create Shared Frontend
-
-1. Extract audio setup from emulator.ts → `src/frontend/audio.ts`
-2. Extract state management → `src/frontend/state-manager.ts`
-3. Move renderers to `src/rendering/`
-4. Create new `src/frontend/emulator.ts` using Core interface
-
-**Verification**: Emulator runs via new frontend with NESCore.
-
-### Phase 4: Update CLI and Entry Point
-
-1. Update `src/index.ts` to use core registry
-2. Add `--core <id>` CLI option for explicit core selection
-3. Add `--list-cores` to show available cores
-4. Update help text
-
-**Verification**: `tui-nes game.nes` auto-detects NES core and runs.
-
-### Phase 5: Cleanup and Documentation
-
-1. Remove old file locations after all imports updated
-2. Update CLAUDE.md with new structure
-3. Update README with multi-core information
-4. Add integration tests for core interface
-
-**Verification**: Full test suite passes, documentation accurate.
-
----
-
-## Future: GBA Core
-
-With this architecture, adding GBA requires:
+The Game Boy Color core is implemented with the following system info:
 
 ```typescript
-const GBA_SYSTEM_INFO: SystemInfo = {
-  id: 'gba',
-  name: 'Game Boy Advance',
-  extensions: ['.gba', '.agb'],
-  width: 240,
-  height: 160,
+const GBC_SYSTEM_INFO: SystemInfo = {
+  id: 'gbc',
+  name: 'Game Boy Color',
+  extensions: ['.gbc', '.gb'],
+  width: 160,
+  height: 144,
   fps: 59.7275,
-  sampleRate: 32768,
+  sampleRate: 44100,
   pixelAspectRatio: 1,
   maxPlayers: 1,
   buttons: [
     { id: 0, name: 'A', ... },
     { id: 1, name: 'B', ... },
-    { id: 2, name: 'L', ... },
-    { id: 3, name: 'R', ... },
-    { id: 4, name: 'Select', ... },
-    { id: 5, name: 'Start', ... },
-    { id: 6, name: 'Up', ... },
-    { id: 7, name: 'Down', ... },
-    { id: 8, name: 'Left', ... },
-    { id: 9, name: 'Right', ... },
+    { id: 2, name: 'Select', ... },
+    { id: 3, name: 'Start', ... },
+    { id: 4, name: 'Up', ... },
+    { id: 5, name: 'Down', ... },
+    { id: 6, name: 'Left', ... },
+    { id: 7, name: 'Right', ... },
   ],
   colorSpace: 'rgb15',
 };
 ```
 
-GBA core implementation requires:
-- ARM7TDMI CPU (32-bit ARM + 16-bit Thumb)
-- GBA PPU (4 BG modes, rotation/scaling, alpha blending)
-- GBA APU (4 GB channels + 2 DirectSound DMA channels)
-- GBA memory map (96KB VRAM, 256KB WRAM, 32KB IWRAM)
-- GBA cartridge handling (up to 32MB ROM)
+GBC core implementation includes:
+- Sharp LR35902 CPU (Z80-like with differences)
+- GBC PPU (tile-based rendering, 8 BG/sprite palettes, VRAM banks)
+- GBC APU (4 channels with stereo panning)
+- Timer system (DIV, TIMA, TMA, TAC registers)
+- MBC mappers (MBC1, MBC2, MBC3, MBC5)
+- CGB double-speed mode support
 
 ---
 
 ## Appendix: System Comparison
 
-| Aspect | NES | GBA |
+| Aspect | NES | GBC |
 |--------|-----|-----|
-| CPU | 6502 @ 1.79 MHz | ARM7TDMI @ 16.78 MHz |
-| Resolution | 256×240 | 240×160 |
+| CPU | 6502 @ 1.79 MHz | LR35902 @ 4.19 MHz |
+| Resolution | 256×240 | 160×144 |
 | Colors | 64 palette | 32,768 (15-bit RGB) |
-| Audio | 5 channels, mono | 6 channels, stereo |
-| Max ROM | 512 KB | 32 MB |
-| Controllers | 8 buttons × 2 | 10 buttons × 1 |
-| Timing | CPU-driven | PPU-driven |
+| Audio | 5 channels, mono | 4 channels, stereo |
+| Max ROM | 512 KB | 8 MB |
+| Controllers | 8 buttons × 2 | 8 buttons × 1 |
+| Timing | CPU-driven | CPU-driven |
