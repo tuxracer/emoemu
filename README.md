@@ -116,6 +116,8 @@ tui-nes game.nes --ascii      # ASCII characters
 tui-nes game.nes --emoji      # Emoji characters
 ```
 
+> **Tip:** When using `--terminal`, `--ascii`, or `--emoji` modes, scale your terminal font down to a small size so the characters are small enough to render graphics clearly. For example, on Ghostty or Kitty on macOS, press `Cmd+-` repeatedly. The default Kitty graphics mode renders at pixel level and doesn't require this.
+
 ### Display Options
 
 ```bash
