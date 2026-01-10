@@ -295,6 +295,7 @@ $FFFF       Interrupt Enable
 - Auto-detects Kitty keyboard protocol for true keyup/keydown events
 - Falls back to legacy mode with 80ms auto-release timing
 - WASD/Arrows for D-pad, K/Z=A, J/X=B, Enter=Start, Space=Select
+- R = cycle render modes, M = toggle audio mute, Esc = quit
 
 **Gamepad** (`input/gamepad-manager.ts`):
 - Uses node-hid for raw HID access (no SDL dependency)

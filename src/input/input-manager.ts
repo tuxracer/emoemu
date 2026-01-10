@@ -85,6 +85,7 @@ const LEGACY_KEY_RELEASE_TIME = 80;
 export interface InputResult {
   quit: boolean;
   cycleRenderMode: boolean;
+  toggleAudio: boolean;
 }
 
 /**
@@ -96,6 +97,7 @@ export class InputManager {
   private controller1: Controller;
   private quitRequested: boolean = false;
   private cycleRenderModeRequested: boolean = false;
+  private toggleAudioRequested: boolean = false;
 
   // Track currently pressed keys (keycode -> button)
   private pressedKeys: Map<number, Button> = new Map();
@@ -223,6 +225,7 @@ export class InputManager {
   processInput(input: string): InputResult {
     // Reset per-frame flags
     this.cycleRenderModeRequested = false;
+    this.toggleAudioRequested = false;
 
     if (this.kittyMode) {
       return this.processKittyInput(input);
@@ -243,7 +246,7 @@ export class InputManager {
       if (this.inputBuffer[0] === '\u0003') {
         this.quitRequested = true;
         this.inputBuffer = this.inputBuffer.slice(1);
-        return { quit: true, cycleRenderMode: false };
+        return { quit: true, cycleRenderMode: false, toggleAudio: false };
       }
 
       // Check for escape sequences
@@ -294,7 +297,7 @@ export class InputManager {
         if (this.inputBuffer.length === 1 || !this.inputBuffer[1]?.match(/[\[\]O]/)) {
           this.quitRequested = true;
           this.inputBuffer = this.inputBuffer.slice(1);
-          return { quit: true, cycleRenderMode: false };
+          return { quit: true, cycleRenderMode: false, toggleAudio: false };
         }
 
         // Unknown escape sequence - wait for more data or skip
@@ -316,13 +319,19 @@ export class InputManager {
         continue;
       }
 
+      // Check for audio toggle (M/m key)
+      if (charCode === 109 || charCode === 77) { // 'm' or 'M'
+        this.toggleAudioRequested = true;
+        continue;
+      }
+
       const button = KITTY_KEY_TO_BUTTON.get(charCode);
       if (button !== undefined) {
         this.handleKeyDown(charCode, button);
       }
     }
 
-    return { quit: false, cycleRenderMode: this.cycleRenderModeRequested };
+    return { quit: false, cycleRenderMode: this.cycleRenderModeRequested, toggleAudio: this.toggleAudioRequested };
   }
 
   /**
@@ -332,13 +341,13 @@ export class InputManager {
     // Check for Ctrl+C
     if (input === '\u0003') {
       this.quitRequested = true;
-      return { quit: true, cycleRenderMode: false };
+      return { quit: true, cycleRenderMode: false, toggleAudio: false };
     }
 
     // Check for Escape
     if (input === '\x1b') {
       this.quitRequested = true;
-      return { quit: true, cycleRenderMode: false };
+      return { quit: true, cycleRenderMode: false, toggleAudio: false };
     }
 
     // Try to match arrow keys first
@@ -352,7 +361,7 @@ export class InputManager {
       if (input.length > 3) {
         return this.processLegacyInput(input.slice(3));
       }
-      return { quit: false, cycleRenderMode: this.cycleRenderModeRequested };
+      return { quit: false, cycleRenderMode: this.cycleRenderModeRequested, toggleAudio: this.toggleAudioRequested };
     }
 
     // Process each character
@@ -360,12 +369,18 @@ export class InputManager {
       if (char === '\x1b') {
         // Standalone escape - quit
         this.quitRequested = true;
-        return { quit: true, cycleRenderMode: false };
+        return { quit: true, cycleRenderMode: false, toggleAudio: false };
       }
 
       // Check for render mode toggle (R/r key)
       if (char === 'r' || char === 'R') {
         this.cycleRenderModeRequested = true;
+        continue;
+      }
+
+      // Check for audio toggle (M/m key)
+      if (char === 'm' || char === 'M') {
+        this.toggleAudioRequested = true;
         continue;
       }
 
@@ -375,7 +390,7 @@ export class InputManager {
       }
     }
 
-    return { quit: false, cycleRenderMode: this.cycleRenderModeRequested };
+    return { quit: false, cycleRenderMode: this.cycleRenderModeRequested, toggleAudio: this.toggleAudioRequested };
   }
 
   /**
@@ -428,6 +443,12 @@ export class InputManager {
     // Check for render mode toggle (R/r key) - only on key press, not release
     if ((keycode === 114 || keycode === 82) && (eventType === 1 || eventType === 2)) {
       this.cycleRenderModeRequested = true;
+      return;
+    }
+
+    // Check for audio toggle (M/m key) - only on key press, not release
+    if ((keycode === 109 || keycode === 77) && (eventType === 1 || eventType === 2)) {
+      this.toggleAudioRequested = true;
       return;
     }
 

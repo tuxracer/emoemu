@@ -623,8 +623,37 @@ export class Emulator {
       if (result.cycleRenderMode) {
         this.cycleRenderMode();
       }
+
+      if (result.toggleAudio) {
+        this.toggleAudio();
+      }
     };
     process.stdin.on('data', this.inputHandler);
+  }
+
+  // Toggle audio on/off
+  private toggleAudio(): void {
+    this.audioEnabled = !this.audioEnabled;
+
+    if (!this.audioEnabled && this.rtAudio) {
+      // Mute: stop the audio stream
+      try {
+        if (this.rtAudio.isStreamRunning()) {
+          this.rtAudio.stop();
+        }
+      } catch {
+        // Ignore errors
+      }
+    } else if (this.audioEnabled && this.rtAudio) {
+      // Unmute: restart the audio stream
+      try {
+        if (!this.rtAudio.isStreamRunning()) {
+          this.rtAudio.start();
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
   }
 
   // Cycle through render modes: kitty -> terminal -> ascii -> emoji -> kitty
@@ -691,8 +720,8 @@ export class Emulator {
     // Render mode (with shortcut hint)
     parts.push(`Render: ${this.renderMode} [R]`);
 
-    // Audio status
-    parts.push(`Audio: ${this.audioEnabled ? 'on' : 'off'}`);
+    // Audio status (with shortcut hint)
+    parts.push(`Audio: ${this.audioEnabled ? 'on' : 'off'} [M]`);
 
     // Input mode - gamepad takes priority if connected
     const gamepadStatus = this.gamepadManager?.getPlayer1Status();

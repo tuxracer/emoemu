@@ -115,7 +115,14 @@ Save states (`.state` files) capture the full emulator state and are saved autom
 | Start      | Enter   | |
 | Select     | Space   | |
 
-Press `Ctrl+C` or `Q` to quit.
+### Shortcuts
+
+| Key | Action |
+|-----|--------|
+| M   | Toggle audio mute |
+| R   | Cycle render mode |
+| Esc | Quit |
+| Ctrl+C | Quit |
 
 ### Gamepad
 
