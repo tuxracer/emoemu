@@ -124,6 +124,7 @@ export class Emulator {
   private renderer: Renderer;
   private renderMode: RenderMode;
   private rtAudio: InstanceType<typeof RtAudio> | null = null;
+  private audioCallback: ((samples: Float32Array) => void) | null = null;
   private audioEnabled: boolean = true;
   private saveStateEnabled: boolean = true;
   private batterySaveEnabled: boolean = true;
@@ -581,9 +582,9 @@ export class Emulator {
       }
     };
 
-    // Connect core's audio output to RtAudio
-    this.core.setAudioCallback((samples: Float32Array) => {
-      if (!this.rtAudio || !this.audioEnabled) return;
+    // Create and store the audio callback so we can disconnect/reconnect it
+    this.audioCallback = (samples: Float32Array) => {
+      if (!this.rtAudio) return;
 
       // Add incoming samples to ring buffer
       for (let i = 0; i < samples.length; i++) {
@@ -600,7 +601,10 @@ export class Emulator {
 
       // Write complete frames to RtAudio's queue
       tryWriteFrames();
-    });
+    };
+
+    // Connect core's audio output to RtAudio
+    this.core.setAudioCallback(this.audioCallback);
   }
 
   private setupStdin(): void {
@@ -635,23 +639,35 @@ export class Emulator {
   private toggleAudio(): void {
     this.audioEnabled = !this.audioEnabled;
 
-    if (!this.audioEnabled && this.rtAudio) {
-      // Mute: stop the audio stream
-      try {
-        if (this.rtAudio.isStreamRunning()) {
-          this.rtAudio.stop();
+    if (!this.audioEnabled) {
+      // Mute: disconnect callback so core stops generating audio samples
+      this.core.setAudioCallback(null);
+
+      // Stop the audio stream
+      if (this.rtAudio) {
+        try {
+          if (this.rtAudio.isStreamRunning()) {
+            this.rtAudio.stop();
+          }
+        } catch {
+          // Ignore errors
         }
-      } catch {
-        // Ignore errors
       }
-    } else if (this.audioEnabled && this.rtAudio) {
-      // Unmute: restart the audio stream
-      try {
-        if (!this.rtAudio.isStreamRunning()) {
-          this.rtAudio.start();
+    } else {
+      // Unmute: reconnect callback so core resumes generating audio
+      if (this.audioCallback) {
+        this.core.setAudioCallback(this.audioCallback);
+      }
+
+      // Restart the audio stream
+      if (this.rtAudio) {
+        try {
+          if (!this.rtAudio.isStreamRunning()) {
+            this.rtAudio.start();
+          }
+        } catch {
+          // Ignore errors
         }
-      } catch {
-        // Ignore errors
       }
     }
   }
