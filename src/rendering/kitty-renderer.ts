@@ -87,6 +87,9 @@ export class KittyRenderer {
   private pngBuffer: Buffer = Buffer.alloc(0);
   // Color space for framebuffer interpretation
   private colorSpace: 'indexed' | 'rgb15';
+  // Dirty rectangle tracking for partial updates
+  private dirtyMinRow: number = 0;
+  private dirtyMaxRow: number = -1;
 
   constructor(options: KittyRendererOptions = {}) {
     this.sourceWidth = options.sourceWidth ?? NES_WIDTH;
@@ -219,6 +222,7 @@ export class KittyRenderer {
 
   // Convert indexed (palette-based) frame buffer to scaled RGB
   // Uses row-level memoization to skip unchanged rows
+  // Tracks dirty region bounds for partial PNG encoding
   private frameToRgbScaledIndexed(frameBuffer: Uint8Array): void {
     const palette = nesPaletteFlat;
     const dst = this.scaledRgbBuffer;
@@ -226,6 +230,10 @@ export class KittyRenderer {
     const scaledRowBytes = this.scaledWidth * 3;
     const rowBuffer = this.scaledRowBuffer;
     const prevFrame = this.prevFrameBuffer as Uint8Array;
+
+    // Reset dirty region tracking
+    this.dirtyMinRow = this.sourceHeight;
+    this.dirtyMaxRow = -1;
 
     for (let srcY = 0; srcY < this.sourceHeight; srcY++) {
       const srcRowStart = srcY * this.sourceWidth;
@@ -241,6 +249,10 @@ export class KittyRenderer {
 
       // Skip scaling if row unchanged (scaled buffer already has correct data)
       if (!rowChanged) continue;
+
+      // Track dirty region bounds (in source coordinates)
+      this.dirtyMinRow = Math.min(this.dirtyMinRow, srcY);
+      this.dirtyMaxRow = Math.max(this.dirtyMaxRow, srcY);
 
       // Scale one source row horizontally into rowBuffer
       let rowIdx = 0;
@@ -272,12 +284,17 @@ export class KittyRenderer {
 
   // Convert RGB15 frame buffer to scaled RGB24
   // RGB15 format: XBBBBBGGGGGRRRRR (5 bits per channel, X is unused)
+  // Tracks dirty region bounds for partial PNG encoding
   private frameToRgbScaledRgb15(frameBuffer: Uint16Array): void {
     const dst = this.scaledRgbBuffer;
     const scale = this.integerScale;
     const scaledRowBytes = this.scaledWidth * 3;
     const rowBuffer = this.scaledRowBuffer;
     const prevFrame = this.prevFrameBuffer as Uint16Array;
+
+    // Reset dirty region tracking
+    this.dirtyMinRow = this.sourceHeight;
+    this.dirtyMaxRow = -1;
 
     for (let srcY = 0; srcY < this.sourceHeight; srcY++) {
       const srcRowStart = srcY * this.sourceWidth;
@@ -293,6 +310,10 @@ export class KittyRenderer {
 
       // Skip scaling if row unchanged
       if (!rowChanged) continue;
+
+      // Track dirty region bounds (in source coordinates)
+      this.dirtyMinRow = Math.min(this.dirtyMinRow, srcY);
+      this.dirtyMaxRow = Math.max(this.dirtyMaxRow, srcY);
 
       // Scale one source row horizontally into rowBuffer
       let rowIdx = 0;
@@ -367,10 +388,62 @@ export class KittyRenderer {
     this.pngBuffer = Buffer.concat([PNG_SIGNATURE, ihdrChunk, idatChunk, iendChunk]);
   }
 
+  // Encode a region of the scaled RGB buffer to PNG format
+  // Used for dirty rectangle optimization - only encode changed rows
+  // Returns the Y offset in scaled pixel coordinates
+  private encodePngRegion(startRow: number, endRow: number): number {
+    const width = this.scaledWidth;
+    const scale = this.integerScale;
+
+    // Convert source row coordinates to scaled row coordinates
+    const scaledStartRow = startRow * scale;
+    const scaledEndRow = (endRow + 1) * scale; // endRow is inclusive
+    const height = scaledEndRow - scaledStartRow;
+
+    const rgbData = this.scaledRgbBuffer;
+    const rowBytes = width * 3;
+
+    // Build raw image data with filter bytes for the region
+    const rawDataSize = height * (1 + rowBytes);
+    const rawData = Buffer.alloc(rawDataSize);
+
+    for (let y = 0; y < height; y++) {
+      const rawRowStart = y * (1 + rowBytes);
+      rawData[rawRowStart] = 0; // Filter type: none
+      // Copy RGB row from the dirty region
+      const srcStart = (scaledStartRow + y) * rowBytes;
+      for (let i = 0; i < rowBytes; i++) {
+        rawData[rawRowStart + 1 + i] = rgbData[srcStart + i];
+      }
+    }
+
+    // Compress with deflate (fast compression for real-time)
+    const compressed = deflateSync(rawData, { level: 1 });
+
+    // Build PNG
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(width, 0);
+    ihdr.writeUInt32BE(height, 4);
+    ihdr[8] = 8;  // bit depth
+    ihdr[9] = 2;  // color type: RGB
+    ihdr[10] = 0; // compression
+    ihdr[11] = 0; // filter
+    ihdr[12] = 0; // interlace
+
+    const ihdrChunk = createPngChunk('IHDR', ihdr);
+    const idatChunk = createPngChunk('IDAT', compressed);
+    const iendChunk = createPngChunk('IEND', Buffer.alloc(0));
+
+    // Combine all chunks
+    this.pngBuffer = Buffer.concat([PNG_SIGNATURE, ihdrChunk, idatChunk, iendChunk]);
+
+    // Return the Y offset where this region should be positioned
+    return scaledStartRow;
+  }
+
   // Send image using Kitty graphics protocol with chunked transmission
-  private sendImage(): string {
-    // Encode to PNG (compressed)
-    this.encodePng();
+  // yOffset: vertical offset in pixels for partial updates (0 for full frame)
+  private sendImage(yOffset: number = 0): string {
     const base64 = this.pngBuffer.toString('base64');
     const chunks: string[] = [];
 
@@ -397,9 +470,11 @@ export class KittyRenderer {
         // q=2: suppress response
         // C=1: do not move cursor after displaying
         // c=cols, r=rows: display size in terminal cells
+        // X,Y: pixel offset for positioning (for partial updates)
         // m=1: more chunks follow (0 if last)
         const displayParams = `,c=${this.displayCols},r=${this.displayRows}`;
-        control = `a=T,f=100,i=${currentId},p=1,q=2,C=1${displayParams},m=${isLast ? 0 : 1}`;
+        const positionParams = yOffset > 0 ? `,X=0,Y=${yOffset}` : '';
+        control = `a=T,f=100,i=${currentId},p=1,q=2,C=1${displayParams}${positionParams},m=${isLast ? 0 : 1}`;
       } else {
         // Subsequent chunks: just continuation
         control = `m=${isLast ? 0 : 1}`;
@@ -446,6 +521,7 @@ export class KittyRenderer {
     }
 
     // Convert frame to scaled RGB using nearest-neighbor interpolation
+    // This also updates dirtyMinRow and dirtyMaxRow
     this.frameToRgbScaledIndexed(frameBuffer);
 
     // Build output
@@ -454,8 +530,28 @@ export class KittyRenderer {
     // Move cursor to centered position for image placement
     output += `${ESC}[${this.offsetRow};${this.offsetCol}H`;
 
+    // Decide between partial and full update based on dirty region
+    let yOffset = 0;
+    if (this.dirtyMaxRow >= this.dirtyMinRow) {
+      const dirtyRowCount = this.dirtyMaxRow - this.dirtyMinRow + 1;
+      const totalRows = this.sourceHeight;
+
+      // Use partial update if less than 60% of rows changed
+      // Full updates are more efficient for large changes due to PNG compression
+      if (dirtyRowCount < totalRows * 0.6) {
+        // Encode only the dirty region
+        yOffset = this.encodePngRegion(this.dirtyMinRow, this.dirtyMaxRow);
+      } else {
+        // Encode full frame
+        this.encodePng();
+      }
+    } else {
+      // No dirty rows (shouldn't happen due to isFrameUnchangedIndexed check)
+      this.encodePng();
+    }
+
     // Send PNG-compressed image
-    output += this.sendImage();
+    output += this.sendImage(yOffset);
 
     return output;
   }
@@ -468,6 +564,7 @@ export class KittyRenderer {
     }
 
     // Convert RGB15 frame to scaled RGB24
+    // This also updates dirtyMinRow and dirtyMaxRow
     this.frameToRgbScaledRgb15(frameBuffer);
 
     // Build output
@@ -476,8 +573,28 @@ export class KittyRenderer {
     // Move cursor to centered position for image placement
     output += `${ESC}[${this.offsetRow};${this.offsetCol}H`;
 
+    // Decide between partial and full update based on dirty region
+    let yOffset = 0;
+    if (this.dirtyMaxRow >= this.dirtyMinRow) {
+      const dirtyRowCount = this.dirtyMaxRow - this.dirtyMinRow + 1;
+      const totalRows = this.sourceHeight;
+
+      // Use partial update if less than 60% of rows changed
+      // Full updates are more efficient for large changes due to PNG compression
+      if (dirtyRowCount < totalRows * 0.6) {
+        // Encode only the dirty region
+        yOffset = this.encodePngRegion(this.dirtyMinRow, this.dirtyMaxRow);
+      } else {
+        // Encode full frame
+        this.encodePng();
+      }
+    } else {
+      // No dirty rows (shouldn't happen due to isFrameUnchangedRgb15 check)
+      this.encodePng();
+    }
+
     // Send PNG-compressed image
-    output += this.sendImage();
+    output += this.sendImage(yOffset);
 
     return output;
   }
