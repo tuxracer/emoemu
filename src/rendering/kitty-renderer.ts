@@ -443,7 +443,8 @@ export class KittyRenderer {
 
   // Send image using Kitty graphics protocol with chunked transmission
   // yOffset: vertical offset in pixels for partial updates (0 for full frame)
-  private sendImage(yOffset: number = 0): string {
+  // partialHeight: height of partial image in pixels (0 for full frame)
+  private sendImage(yOffset: number = 0, partialHeight: number = 0): string {
     const base64 = this.pngBuffer.toString('base64');
     const chunks: string[] = [];
 
@@ -453,6 +454,23 @@ export class KittyRenderer {
     // Use alternating image IDs for double-buffering effect
     const currentId = this.imageId + (this.frameNumber % 2);
     const previousId = this.imageId + ((this.frameNumber + 1) % 2);
+
+    // Calculate display dimensions in terminal cells
+    // For partial updates, use the actual partial image dimensions
+    // For full updates, use the full display dimensions
+    let displayCols: number;
+    let displayRows: number;
+
+    if (partialHeight > 0) {
+      // Partial update: calculate cell dimensions for the partial image
+      const partialWidth = this.scaledWidth;
+      displayCols = Math.ceil(partialWidth / CELL_WIDTH_PX);
+      displayRows = Math.ceil(partialHeight / CELL_HEIGHT_PX);
+    } else {
+      // Full update: use full display dimensions
+      displayCols = this.displayCols;
+      displayRows = this.displayRows;
+    }
 
     for (let i = 0; i < base64.length; i += chunkSize) {
       const chunk = base64.slice(i, i + chunkSize);
@@ -469,10 +487,10 @@ export class KittyRenderer {
         // p=1: placement ID (allows replacing in place)
         // q=2: suppress response
         // C=1: do not move cursor after displaying
-        // c=cols, r=rows: display size in terminal cells
+        // c=cols, r=rows: display size in terminal cells (adjusted for partial images)
         // X,Y: pixel offset for positioning (for partial updates)
         // m=1: more chunks follow (0 if last)
-        const displayParams = `,c=${this.displayCols},r=${this.displayRows}`;
+        const displayParams = `,c=${displayCols},r=${displayRows}`;
         const positionParams = yOffset > 0 ? `,X=0,Y=${yOffset}` : '';
         control = `a=T,f=100,i=${currentId},p=1,q=2,C=1${displayParams}${positionParams},m=${isLast ? 0 : 1}`;
       } else {
@@ -532,6 +550,7 @@ export class KittyRenderer {
 
     // Decide between partial and full update based on dirty region
     let yOffset = 0;
+    let partialHeight = 0;
     if (this.dirtyMaxRow >= this.dirtyMinRow) {
       const dirtyRowCount = this.dirtyMaxRow - this.dirtyMinRow + 1;
       const totalRows = this.sourceHeight;
@@ -541,6 +560,8 @@ export class KittyRenderer {
       if (dirtyRowCount < totalRows * 0.6) {
         // Encode only the dirty region
         yOffset = this.encodePngRegion(this.dirtyMinRow, this.dirtyMaxRow);
+        // Calculate partial height in scaled pixels
+        partialHeight = dirtyRowCount * this.integerScale;
       } else {
         // Encode full frame
         this.encodePng();
@@ -551,7 +572,7 @@ export class KittyRenderer {
     }
 
     // Send PNG-compressed image
-    output += this.sendImage(yOffset);
+    output += this.sendImage(yOffset, partialHeight);
 
     return output;
   }
@@ -575,6 +596,7 @@ export class KittyRenderer {
 
     // Decide between partial and full update based on dirty region
     let yOffset = 0;
+    let partialHeight = 0;
     if (this.dirtyMaxRow >= this.dirtyMinRow) {
       const dirtyRowCount = this.dirtyMaxRow - this.dirtyMinRow + 1;
       const totalRows = this.sourceHeight;
@@ -584,6 +606,8 @@ export class KittyRenderer {
       if (dirtyRowCount < totalRows * 0.6) {
         // Encode only the dirty region
         yOffset = this.encodePngRegion(this.dirtyMinRow, this.dirtyMaxRow);
+        // Calculate partial height in scaled pixels
+        partialHeight = dirtyRowCount * this.integerScale;
       } else {
         // Encode full frame
         this.encodePng();
@@ -594,7 +618,7 @@ export class KittyRenderer {
     }
 
     // Send PNG-compressed image
-    output += this.sendImage(yOffset);
+    output += this.sendImage(yOffset, partialHeight);
 
     return output;
   }
