@@ -447,13 +447,18 @@ export class KittyRenderer {
   private sendImage(yOffset: number = 0, partialHeight: number = 0): string {
     const base64 = this.pngBuffer.toString('base64');
     const chunks: string[] = [];
+    const isPartialUpdate = partialHeight > 0;
 
     // Kitty recommends chunks of 4096 bytes
     const chunkSize = 4096;
 
-    // Use alternating image IDs for double-buffering effect
-    const currentId = this.imageId + (this.frameNumber % 2);
-    const previousId = this.imageId + ((this.frameNumber + 1) % 2);
+    // Use separate ID spaces for full vs partial images to prevent partial updates
+    // from overwriting the base full-frame image when IDs cycle
+    // Full frames: imageId + (0 or 1)
+    // Partial frames: imageId + 10 + (0 or 1)
+    const idOffset = isPartialUpdate ? 10 : 0;
+    const currentId = this.imageId + idOffset + (this.frameNumber % 2);
+    const previousId = this.imageId + idOffset + ((this.frameNumber + 1) % 2);
 
     // Calculate display dimensions in terminal cells
     // For partial updates, use the actual partial image dimensions
@@ -461,7 +466,7 @@ export class KittyRenderer {
     let displayCols: number;
     let displayRows: number;
 
-    if (partialHeight > 0) {
+    if (isPartialUpdate) {
       // Partial update: calculate cell dimensions for the partial image
       const partialWidth = this.scaledWidth;
       displayCols = Math.ceil(partialWidth / CELL_WIDTH_PX);
@@ -501,9 +506,23 @@ export class KittyRenderer {
       chunks.push(`${APC}${control};${chunk}${ST}`);
     }
 
-    // Delete previous frame's image after displaying new one
+    // Clean up old images:
+    // - For full frames: delete previous full frame
+    // - For partial frames: delete previous partial overlay (if any)
+    // - When transitioning to full frame: also clean up any partial overlays
     if (this.frameNumber > 0) {
-      chunks.push(`${APC}a=d,d=I,i=${previousId},q=2${ST}`);
+      if (!isPartialUpdate) {
+        // Full frame: delete previous full frame
+        chunks.push(`${APC}a=d,d=I,i=${previousId},q=2${ST}`);
+        // Also delete any partial overlays that may exist
+        const partialId1 = this.imageId + 10 + 0;
+        const partialId2 = this.imageId + 10 + 1;
+        chunks.push(`${APC}a=d,d=I,i=${partialId1},q=2${ST}`);
+        chunks.push(`${APC}a=d,d=I,i=${partialId2},q=2${ST}`);
+      } else {
+        // Partial frame: delete previous partial overlay
+        chunks.push(`${APC}a=d,d=I,i=${previousId},q=2${ST}`);
+      }
     }
 
     this.frameNumber++;
