@@ -1,0 +1,10 @@
+minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  - ink-sdl
+
+allowBuilds:
+  audify: true
+  esbuild: true
+  koffi: true
+  node-hid: true
+  sharp: true

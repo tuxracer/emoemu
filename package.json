@@ -1,0 +1,63 @@
+{
+  "name": "emoemu",
+  "version": "0.2.0",
+  "description": "A terminal-based multi-core emulator written in TypeScript",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "emoemu": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsup --entry.index=src/index.ts --entry.kittyEncodeWorker=src/rendering/kittyEncodeWorker/index.ts --watch --onSuccess 'node dist/index.js'",
+    "build": "tsc --noEmit && tsup --entry.index=src/index.ts --entry.kittyEncodeWorker=src/rendering/kittyEncodeWorker/index.ts --format esm --dts --define.__APP_VERSION__=\\\"$npm_package_version\\\" --define.__BUILD_DATE__=\\\"$(date +%Y%m%d)\\\" --define.__APP_ICON_BASE64__=\\\"$(base64 -i icon/icon.png | tr -d '\\n')\\\"",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run test:run"
+  },
+  "keywords": [
+    "nes",
+    "emulator",
+    "terminal",
+    "tui",
+    "6502"
+  ],
+  "author": "Derek Petersen <tuxracer@gmail.com>",
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "@inkjs/ui": "^2.0.0",
+    "audify": "^1.10.1",
+    "chalk": "^5.3.0",
+    "fzstd": "^0.1.1",
+    "ink": "^6.6.0",
+    "ink-native": "^0.4.0",
+    "koffi": "^2.15.0",
+    "node-hid": "^3.1.0",
+    "node-notifier": "^10.0.1",
+    "react": "^19.2.3",
+    "remeda": "^2.33.1",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^22.10.2",
+    "@types/node-hid": "^1.3.4",
+    "@types/node-notifier": "^8.0.5",
+    "@types/react": "^19.2.7",
+    "@typescript-eslint/eslint-plugin": "^8.52.0",
+    "@typescript-eslint/parser": "^8.52.0",
+    "eslint": "^9.39.2",
+    "eslint-plugin-prefer-arrow-functions": "^3.9.1",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "packageManager": "pnpm@11.10.0"
+}
